@@ -30,22 +30,73 @@ const DM = [
   'PROPERTY', 'GRAPH', 'MANAGEMENT',
 ];
 
-/** 采集器配置 JSON 示例 */
-const COLLECTOR_JSON_EXAMPLE = `示例（HTTP API 类型）：
-{
+/** 各采集类型的配置 JSON 示例 */
+const COLLECTOR_EXAMPLES: Record<string, string> = {
+  HTTP_API: `{
   "url": "https://api.example.com/data",
   "method": "GET",
   "headers": {"Authorization": "Bearer xxx"},
-  "params": {"pageSize": 100}
-}`;
+  "params": {"pageSize": 100, "pageNum": 1},
+  "responseType": "JSON"
+}`,
+  DB_SYNC: `{
+  "dbType": "MySQL",
+  "host": "192.168.1.100",
+  "port": 3306,
+  "database": "source_db",
+  "username": "readonly_user",
+  "password": "***",
+  "querySql": "SELECT * FROM financial_report WHERE update_time > ?",
+  "incrementalColumn": "update_time"
+}`,
+  SFTP_FILE: `{
+  "host": "sftp.example.com",
+  "port": 22,
+  "username": "data_user",
+  "password": "***",
+  "remotePath": "/data/reports/",
+  "filePattern": "*.xlsx",
+  "deleteAfterDownload": false
+}`,
+  FILE_UPLOAD: `{
+  "allowedExtensions": [".xlsx", ".csv", ".pdf"],
+  "maxFileSizeMB": 50,
+  "templateId": "financial_report_template"
+}`,
+  WEBHOOK: `{
+  "listenPath": "/webhook/data-push",
+  "secret": "your_webhook_secret",
+  "validateSignature": true,
+  "dataFormat": "JSON"
+}`,
+};
 
-/** 解析器配置 JSON 示例 */
-const PARSER_JSON_EXAMPLE = `示例（JSONPath 类型）：
-{
+/** 各解析类型的配置 JSON 示例 */
+const PARSER_EXAMPLES: Record<string, string> = {
+  JSON_PATH: `{
   "mappings": [
-    {"key": "total_assets", "name": "总资产", "path": "$.data.totalAssets"}
+    {"key": "total_assets", "name": "总资产", "path": "$.data.totalAssets"},
+    {"key": "revenue", "name": "营业收入", "path": "$.data.revenue"}
   ]
-}`;
+}`,
+  EXCEL_TEMPLATE: `{
+  "sheetName": "Sheet1",
+  "startRow": 3,
+  "columnMapping": {
+    "A": "total_assets",
+    "B": "revenue",
+    "C": "net_profit"
+  }
+}`,
+  OCR_TEXT: `{
+  "keywords": ["资产总额", "营业收入", "净利润"],
+  "extractPattern": "keyValue",
+  "valuePosition": "right"
+}`,
+  GROOVY_SCRIPT: `{
+  "script": "def result = [:]\\ndef json = new groovy.json.JsonSlurper().parseText(rawData)\\nresult.total_assets = json.data.totalAssets\\nreturn result"
+}`,
+};
 
 export default function DataConfig() {
   const [cl, setCl] = useState<any[]>([]);         // 采集器列表
@@ -55,6 +106,20 @@ export default function DataConfig() {
   const [sid, setSid] = useState<number | null>(null); // 当前选中的采集器 ID
   const [f] = Form.useForm();
   const [pf] = Form.useForm();
+
+  /** 监听表单中选择的采集类型，动态切换 JSON 占位示例 */
+  const watchedCollectorType = Form.useWatch('collectorType', f);
+  const collectorPlaceholder = watchedCollectorType
+    ? `请按「${CT.find(c => c.value === watchedCollectorType)?.label || watchedCollectorType}」格式填写：
+${COLLECTOR_EXAMPLES[watchedCollectorType] || '{}'}`
+    : '请先选择采集类型，再填写对应 JSON 配置';
+
+  /** 监听表单中选择的解析类型，动态切换 JSON 占位示例 */
+  const watchedParserType = Form.useWatch('parserType', pf);
+  const parserPlaceholder = watchedParserType
+    ? `请按「${PT.find(p => p.value === watchedParserType)?.label || watchedParserType}」格式填写：
+${PARSER_EXAMPLES[watchedParserType] || '{}'}`
+    : '请先选择解析类型，再填写对应 JSON 配置';
 
   /** 加载采集器列表 */
   const fc = async () => {
@@ -129,7 +194,7 @@ export default function DataConfig() {
           <Form.Item name="collectorType" label="采集类型" rules={[{ required: true }]}><Select options={CT} /></Form.Item>
           <Form.Item name="configJson" label="配置JSON" rules={[{ required: true }]}
             help="根据采集类型填写对应配置（JSON 格式）">
-            <Input.TextArea rows={6} placeholder={COLLECTOR_JSON_EXAMPLE} />
+            <Input.TextArea rows={6} placeholder={collectorPlaceholder} />
           </Form.Item>
           <Form.Item name="cronExpression" label="定时表达式"
             help="Cron 表达式，控制采集任务的执行频率。留空则仅手动触发。">
@@ -150,7 +215,7 @@ export default function DataConfig() {
           </Form.Item>
           <Form.Item name="configJson" label="配置JSON" rules={[{ required: true }]}
             help="根据解析类型填写对应配置（JSON 格式）">
-            <Input.TextArea rows={4} placeholder={PARSER_JSON_EXAMPLE} />
+            <Input.TextArea rows={4} placeholder={parserPlaceholder} />
           </Form.Item>
         </Form>
       </Modal>

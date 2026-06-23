@@ -1,0 +1,1472 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>贷后管理报告</title>
+  <style>
+    :root{
+      --bg:#f4f8ff;
+      --panel:rgba(255,255,255,.94);
+      --line:rgba(31,90,181,.14);
+      --text:#10233f;
+      --muted:#5d7396;
+      --accent:#1664ff;
+      --shadow:0 20px 56px rgba(35,88,176,.12);
+      --radius:24px;
+      --red:#b1342c;
+      --orange:#d7872d;
+      --yellow:#d6a11f;
+    }
+    *{box-sizing:border-box}
+    html{scroll-behavior:smooth}
+    body{
+      margin:0;
+      font-family:"PingFang SC","Hiragino Sans GB","Noto Sans SC","Microsoft YaHei",sans-serif;
+      color:var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(84,160,255,.18), transparent 26%),
+        radial-gradient(circle at 85% 18%, rgba(0,201,255,.12), transparent 18%),
+        radial-gradient(circle at 80% 80%, rgba(22,100,255,.08), transparent 20%),
+        linear-gradient(180deg,#fdfefe 0%,#f3f8ff 58%,#eef5ff 100%);
+      min-height:100vh;
+    }
+    button,input,textarea{font:inherit}
+    .report-shell{
+      display:grid;
+      grid-template-columns:260px minmax(0,1fr) 390px;
+      gap:18px;
+      align-items:start;
+      padding:28px;
+    }
+    .panel{
+      border-radius:var(--radius);
+      border:1px solid var(--line);
+      background:var(--panel);
+      box-shadow:var(--shadow);
+      backdrop-filter:blur(18px);
+    }
+    .report-nav,.side-panel{
+      position:sticky;
+      top:24px;
+      max-height:calc(100vh - 48px);
+      overflow:auto;
+      padding:22px;
+    }
+    .report-main{min-width:0}
+    .report-topbar{
+      display:flex;
+      justify-content:space-between;
+      align-items:flex-start;
+      gap:16px;
+      margin-bottom:18px;
+      padding:22px 24px;
+    }
+    .report-topbar-copy{display:grid;gap:8px;min-width:0}
+    .report-company-title{
+      margin:0;
+      font-size:clamp(1.45rem,2.6vw,2.35rem);
+      line-height:1.12;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .report-page-subtitle{
+      margin:0;
+      color:var(--muted);
+      font-size:1.05rem;
+      letter-spacing:.18em;
+    }
+    .toolbar{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end}
+    .report-topbar .toolbar{max-width:560px;flex:0 0 auto}
+    .primary-btn,.ghost-btn,.icon-btn,.context-menu button,.fake-chip{
+      border:0;
+      border-radius:14px;
+      padding:11px 15px;
+      cursor:pointer;
+      transition:transform .18s ease, background .18s ease, box-shadow .18s ease;
+    }
+    .primary-btn{
+      color:#fff;
+      background:var(--accent);
+      box-shadow:0 10px 24px rgba(22,100,255,.24);
+    }
+    .ghost-btn,.icon-btn,.context-menu button,.fake-chip{
+      color:var(--text);
+      background:#fff;
+      border:1px solid var(--line);
+    }
+    .primary-btn:hover,.ghost-btn:hover,.icon-btn:hover,.context-menu button:hover,.fake-chip:hover{
+      transform:translateY(-1px);
+    }
+    .report-topbar .ghost-btn,.report-topbar .primary-btn{
+      min-width:96px;
+      max-width:120px;
+      min-height:52px;
+      padding:10px 14px;
+      line-height:1.35;
+      text-align:center;
+      white-space:normal;
+    }
+    .panel-head{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:12px;
+      margin-bottom:12px;
+    }
+    .panel-head h2{margin:0;font-size:1.2rem}
+    .sticky-head{
+      position:sticky;
+      top:0;
+      z-index:3;
+      background:inherit;
+      padding-bottom:12px;
+    }
+    .filter-box{margin-top:10px;color:var(--muted);font-size:14px}
+    .chapter-nav{display:flex;flex-direction:column;gap:8px;margin-top:14px}
+    .nav-item{
+      display:block;
+      padding:12px 10px;
+      border-radius:16px;
+      text-decoration:none;
+      color:inherit;
+    }
+    .nav-item:hover,.nav-item.active{background:rgba(227,239,255,.72)}
+    .nav-item strong{display:block;line-height:1.45}
+    .nav-item span{display:block;margin-top:4px;font-size:12px;color:var(--muted)}
+    .report-sections{display:grid;gap:18px}
+    .section-card{
+      position:relative;
+      padding:24px;
+      border-radius:28px;
+      background:linear-gradient(180deg,rgba(255,255,255,.96),rgba(247,251,255,.94));
+      border:1px solid var(--line);
+      box-shadow:var(--shadow);
+      overflow:hidden;
+      scroll-margin-top:24px;
+    }
+    .section-card::before{
+      content:"";
+      position:absolute;
+      inset:0 auto auto 0;
+      width:100%;
+      height:1px;
+      background:linear-gradient(90deg,rgba(22,100,255,.52),transparent 68%);
+    }
+    .section-card h3{margin:0 0 12px;font-size:1.38rem}
+    .section-card h4{margin:18px 0 8px;font-size:1.05rem}
+    .section-body{color:var(--text);line-height:1.82}
+    .section-body p{margin:10px 0}
+    .empty-state,.muted{color:var(--muted)}
+    .section-actions{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      margin-top:16px;
+      padding-top:14px;
+      border-top:1px dashed rgba(67,97,238,.20);
+    }
+    .table-wrap{
+      overflow:auto;
+      margin:12px 0 18px;
+      border-radius:16px;
+      border:1px solid var(--line);
+      background:rgba(255,255,255,.76);
+    }
+    table{width:100%;min-width:760px;border-collapse:collapse}
+    th,td{
+      text-align:left;
+      vertical-align:top;
+      padding:12px 11px;
+      border-bottom:1px solid var(--line);
+      word-break:break-word;
+    }
+    th{
+      font-size:13px;
+      color:var(--muted);
+      background:rgba(237,244,255,.92);
+      font-weight:700;
+    }
+    tr:last-child td{border-bottom:0}
+    .kv-compact table{min-width:0}
+    .kv-compact td{padding:8px 10px;line-height:1.55}
+    .kv-key{
+      width:170px;
+      color:var(--muted);
+      background:rgba(237,244,255,.68);
+      font-weight:700;
+      white-space:nowrap;
+    }
+    .risk-pill{
+      display:inline-block;
+      min-width:44px;
+      padding:6px 10px;
+      border-radius:999px;
+      color:#fff;
+      font-size:12px;
+      text-align:center;
+      font-weight:700;
+    }
+    .risk-red{background:var(--red)}
+    .risk-orange{background:var(--orange)}
+    .risk-yellow{background:var(--yellow)}
+    .overview-box,.insight-box{
+      padding:16px 18px;
+      border:1px solid rgba(22,100,255,.14);
+      border-radius:18px;
+      background:linear-gradient(180deg,rgba(245,249,255,.96),rgba(255,255,255,.96));
+      margin-bottom:12px;
+    }
+    .side-panel{
+      transition:transform .28s ease, opacity .28s ease, box-shadow .28s ease;
+      border:1px solid rgba(106,90,249,.24);
+      background:
+        linear-gradient(180deg,rgba(255,255,255,.96),rgba(244,248,255,.94)),
+        linear-gradient(135deg,rgba(68,117,255,.08),rgba(131,88,255,.08));
+      box-shadow:0 26px 72px rgba(18,42,86,.18), inset 0 0 0 1px rgba(118,129,255,.06);
+    }
+    .side-panel.collapsed{
+      transform:translateX(calc(100% + 28px));
+      opacity:0;
+      pointer-events:none;
+    }
+    .side-panel.expanded{
+      position:fixed;
+      inset:16px 16px 16px 278px;
+      width:auto;
+      max-height:calc(100vh - 32px);
+      z-index:32;
+      box-shadow:0 32px 80px rgba(13,31,62,.24);
+    }
+    .side-panel-content{display:grid;gap:14px}
+    .source-block{
+      padding:16px;
+      border:1px solid var(--line);
+      border-radius:18px;
+      background:rgba(248,251,255,.95);
+    }
+    .source-block h4{margin:0 0 8px}
+    .source-block p{margin:8px 0;line-height:1.78}
+    .fake-check-wrap{display:flex;flex-wrap:wrap;gap:10px;margin:8px 0 14px}
+    .fake-chip{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding:8px 12px;
+      border-radius:999px;
+      font-size:13px;
+      user-select:none;
+      cursor:default;
+    }
+    .fake-chip input{accent-color:var(--accent);pointer-events:none}
+    .side-panel-launcher,.back-to-top{
+      position:fixed;
+      right:18px;
+      width:48px;
+      height:48px;
+      border:1px solid rgba(22,100,255,.26);
+      border-radius:50%;
+      background:linear-gradient(135deg,#edf4ff,#e9e3ff);
+      color:var(--accent);
+      font-size:1.2rem;
+      font-weight:800;
+      box-shadow:0 16px 40px rgba(22,100,255,.16);
+      cursor:pointer;
+      z-index:31;
+    }
+    .side-panel-launcher{top:50%;transform:translateY(-50%)}
+    .back-to-top{bottom:22px;font-size:1.35rem}
+    .panel-backdrop{
+      position:fixed;
+      inset:0;
+      background:rgba(6,12,25,.28);
+      backdrop-filter:blur(3px);
+      z-index:30;
+    }
+    .hidden{display:none!important}
+    .context-menu{
+      position:fixed;
+      z-index:40;
+      display:grid;
+      gap:6px;
+      padding:8px;
+      border-radius:18px;
+      border:1px solid var(--line);
+      background:var(--panel);
+      box-shadow:var(--shadow);
+      backdrop-filter:blur(18px);
+    }
+    .context-menu button{text-align:left;border-radius:12px;padding:10px 13px}
+    .editable-block{
+      outline:2px solid rgba(22,100,255,.28);
+      border-radius:8px;
+      background:rgba(220,232,255,.35);
+    }
+    .manual-card{
+      padding:14px;
+      border:1px dashed rgba(22,100,255,.35);
+      border-radius:16px;
+      background:rgba(245,250,255,.94);
+      margin-top:12px;
+    }
+    .manual-card textarea{
+      width:100%;
+      min-height:96px;
+      padding:12px;
+      border-radius:14px;
+      border:1px solid var(--line);
+      resize:vertical;
+    }
+    details.right-accordion{
+      border:1px solid rgba(22,100,255,.14);
+      border-radius:18px;
+      background:rgba(248,251,255,.96);
+      overflow:hidden;
+      margin-bottom:10px;
+    }
+    details.right-accordion summary{
+      cursor:pointer;
+      padding:14px 16px;
+      font-weight:700;
+      list-style:none;
+    }
+    details.right-accordion summary::-webkit-details-marker{display:none}
+    details.right-accordion[open] summary{
+      border-bottom:1px solid rgba(22,100,255,.12);
+      background:rgba(227,239,255,.48);
+    }
+    .right-accordion-body{padding:14px 16px 16px;line-height:1.75}
+    @media (max-width:1180px){
+      .report-shell{grid-template-columns:1fr}
+      .report-nav,.side-panel{position:relative;top:0;max-height:none}
+      .side-panel.collapsed{transform:none;opacity:1;pointer-events:auto}
+      .side-panel.expanded{position:relative;inset:auto;max-height:none}
+      .side-panel-launcher{display:none}
+    }
+    @media (max-width:860px){
+      .report-shell{padding:16px}
+      .report-topbar,.panel-head{flex-direction:column;align-items:stretch}
+      .report-topbar .toolbar{justify-content:flex-start}
+      .report-company-title{white-space:normal}
+      .kv-key{width:120px}
+    }
+    @media print{
+      body{background:#fff}
+      .report-shell{display:block;padding:0}
+      .report-nav,.side-panel,.side-panel-launcher,.back-to-top,.toolbar,
+      .section-actions,.context-menu,.panel-backdrop{display:none!important}
+      .report-topbar,.section-card{box-shadow:none;border:0;border-radius:0}
+      .table-wrap{overflow:visible}
+      table{min-width:0}
+    }
+  </style>
+</head>
+<body>
+  <div class="report-shell">
+    <aside class="report-nav panel">
+      <div class="panel-head sticky-head">
+        <h2>报告目录</h2>
+      </div>
+      <div class="filter-box">
+        <label><input id="toggle-dynamic-only" type="checkbox" /> 只看有动态模块</label>
+      </div>
+      <nav id="chapter-nav" class="chapter-nav"></nav>
+    </aside>
+
+    <main class="report-main">
+      <header class="report-topbar panel">
+        <div class="report-topbar-copy">
+          <h1 id="report-company-title" class="report-company-title">江苏xx制造有限公司</h1>
+          <p class="report-page-subtitle">贷后管理报告</p>
+        </div>
+        <div class="toolbar">
+          <button id="download-word" class="ghost-btn" type="button">深度分析</button>
+          <button id="show-management-panel" class="ghost-btn" type="button">回溯管理<br>要求</button>
+          <button id="show-customer-background-panel" class="ghost-btn" type="button">客户背景</button>
+          <button id="download-report-word" class="primary-btn" type="button">下载 Word</button>
+        </div>
+      </header>
+
+      <section id="report-sections" class="report-sections"></section>
+    </main>
+
+    <aside id="side-panel" class="side-panel panel collapsed">
+      <div class="panel-head sticky-head">
+        <h2 id="side-panel-title">侧边栏</h2>
+        <div class="toolbar">
+          <button id="toggle-panel-size" class="icon-btn" type="button" title="全屏/还原">⤢</button>
+          <button id="toggle-panel-collapse" class="icon-btn" type="button" title="收起">×</button>
+        </div>
+      </div>
+      <div id="side-panel-content" class="side-panel-content">
+        <p class="empty-state">可通过顶部按钮查看客户背景 / 回溯管理要求，或在正文模块上右键查看溯源信息。</p>
+      </div>
+    </aside>
+
+    <button id="side-panel-launcher" class="side-panel-launcher" type="button" title="打开右侧栏">◧</button>
+    <button id="back-to-top" class="back-to-top" type="button" title="回到顶部">↑</button>
+  </div>
+
+  <div id="panel-backdrop" class="panel-backdrop hidden"></div>
+
+  <div id="context-menu" class="context-menu hidden">
+    <button data-action="provenance" type="button">查看溯源信息</button>
+    <button data-action="insert-manual-note" type="button">人工填写</button>
+    <button data-action="edit-current-block" type="button">修改当前文段</button>
+  </div>
+
+  <script>
+    const REPORT = {
+      companyName: "江苏xx制造有限公司",
+      subtitle: "贷后管理报告"
+    };
+
+    const knowledgeUnitRows = [
+      {"项目":"知识单元","内容":"受托支付资金归集（规则编号：T-FUND-003）"},
+      {"项目":"适用场景","内容":"流动资金贷款受托支付、固定资产贷款受托支付"},
+      {"项目":"触发条件","内容":"受托对手收款后 30 日内，划出金额 ≥受托金额 60%，且划出笔数 ≥3 笔"},
+      {"项目":"扩展特征","内容":"收款方与划出收款方存在工商关联（共同法人/股东）；合同发票金额与受托金额不匹配"},
+      {"项目":"置信度判断","内容":"流水数据直接命中 = 高；工商比对交叉验证 = 中高；合同发票核查 = 中高；综合得出 高"},
+      {"项目":"风险传导路径","内容":"借款人 → 受托支付 → 钢材贸易公司 → 供应链公司 → 实控人关联方（资金灭失）"},
+      {"项目":"处置模式","内容":"智能体自动推送 + 客户经理实地核实 + 风控岗复核 + 必要时法务介入"},
+      {"项目":"关联知识","内容":"T-FUND-001（信贷资金回流）、T-FUND-002（资金用途异常）、T-CORP-007（隐性关联方识别）"}
+    ];
+
+    const riskInsightBaseRows = [
+      {"项目":"预警编号","内容":"ALERT-2024-0403-001"},
+      {"项目":"预警等级","内容":"红色（高风险）"},
+      {"项目":"风险类型","内容":"交易行为风险 > 信贷资金流向异常 > 受托支付资金归集"},
+      {"项目":"触发规则","内容":"受托支付资金归集（命中规则 T-FUND-003）"},
+      {"项目":"信号摘要","内容":"受托支付款 800 万中 712 万（89%）于 4 日内划转至关联方，贸易背景存疑，资金疑似流入实控人控制的他公司"},
+      {"项目":"关联客户","内容":"借款企业（苏州某精密机械制造公司）、上海某钢铁贸易公司（受托对手）、江苏某供应链公司（资金流向关联方）"},
+      {"项目":"置信度","内容":"高（流水数据 + 工商穿透 + 合同发票比对）"},
+      {"项目":"处置建议","内容":"① 立即推送客户经理，要求实地核实贸易背景 ② 核查发票真伪及合同实际执行情况 ③ 评估是否触发贷款提前到期条款 ④ 将关联方信息录入关联关系图谱"},
+      {"项目":"推送对象","内容":"客户经理 / 贷后管理岗 / 风控主管"},
+      {"项目":"处置期限","内容":"3 个工作日内反馈实地核查结果"},
+      {"项目":"后续跟踪","内容":"如核实确认违规，提请法务介入，评估是否启动诉讼或担保品处置"}
+    ];
+
+    const riskInsightReasonRows = [
+      {"推理节点":"节点 1：受托支付资金归集","判断依据":"收款方（上海钢铁贸易公司）于收受托款后第 3 天起，分多笔划出，4 日内累计划出 712 万（占受托金额 89%），账户基本清零。划转收款方“江苏某供应链公司”与上海钢铁贸易公司存在共同法定代表人。","置信度":"高（流水数据直接证据）","风险等级":"高风险","结论":"资金链疑似闭环回流至关联方"},
+      {"推理节点":"节点 2：交易真实性存疑","判断依据":"上海钢铁贸易公司主营钢材批发，但“江苏某供应链公司”工商经营范围不含钢材销售。采购合同金额 800 万，对应发票仅 520 万，发票金额与划出金额不匹配。","置信度":"中高（工商+合同比对）","风险等级":"高风险","结论":"贸易背景存疑，涉嫌发票虚开"},
+      {"推理节点":"节点 3：隐性关联方占用","判断依据":"“江苏某供应链公司”法人兼持股 60% 的股东，与借款人实控人存在历史关联（10 年前共同持股）。712 万最终流入借款人实控人控制的另一家公司（常熟某机械厂）。","置信度":"高（工商穿透+资金流追踪）","风险等级":"高风险","结论":"贷款资金被关联方占用，涉嫌骗贷"},
+      {"推理节点":"节点 4：综合风险定级","判断依据":"三点叠加：受托支付资金归集 + 贸易背景不实 + 关联方占用 = 复合型违规。综合置信度高，触发红色预警。","置信度":"高","风险等级":"红色预警","结论":"建议立即启动提前到期或压降程序"}
+    ];
+
+    const riskInsightTriggerRows = [
+      {"项目":"触发时间","内容":"2024 年 4 月 3 日（受托支付放款后第 19 天）"},
+      {"项目":"触发规则","内容":"受托支付资金划转后 30 天内，收款方账户资金高频划转至同一第三方。阈值：划出笔数 ≥3 笔 / 累计金额 ≥受托金额 60%"},
+      {"项目":"实际命中","内容":"上海某钢铁贸易公司收款后 4 日内，分 4 笔（共 712 万元）划转至“江苏某供应链公司”（收款方关联方）"}
+    ];
+
+    const basicInfoRows = [
+      {"项目":"企业名称","内容":"江苏xx制造有限公司"},
+      {"项目":"统一社会信用代码","内容":"9132XXXXXXXXXXXXXX"},
+      {"项目":"注册资本","内容":"20,000万元"},
+      {"项目":"成立日期","内容":"2016年5月18日"},
+      {"项目":"实缴资本","内容":"15,000万元"},
+      {"项目":"所属行业","内容":"专用设备制造业"},
+      {"项目":"曾用名","内容":"/"},
+      {"项目":"登记状态","内容":"存续"},
+      {"项目":"注册地址","内容":"泰兴经济开发区澄江西一路29号"},
+      {"项目":"控股类型","内容":"民营控股"},
+      {"项目":"主营业务","内容":"智能自动化生产设备、精密检测设备及工业机器人系统集成产品的研发、生产和销售，主要服务于汽车零部件、消费电子、新能源电池及高端装备制造等行业客户"},
+      {"项目":"股东","内容":"XX控股集团有限公司（65%）；张某某（20%）；苏州XXXX投资合伙企业（有限合伙）（15%）"},
+      {"项目":"实际控制人","内容":"张某某"},
+      {"项目":"法人代表","内容":"周某某"},
+      {"项目":"所属集团","内容":"XX控股集团有限公司"},
+      {"项目":"客户类型","内容":"公司客户"},
+      {"项目":"首贷日期","内容":"2021年6月18日"},
+      {"项目":"最新批复日期","内容":"2025年3月15日"},
+      {"项目":"基本开户行","内容":"中国XX银行XX分行XX区支行"},
+      {"项目":"主要结算行","内容":"XX银行XX支行"}
+    ];
+
+    const creditUsageRows = [
+      {"合同编号":"XXX202500080","贷款种类":"2010","币种":"人民币","贷款金额":"21,400,000","贷款余额":"21,400,000","贷款起始日":"2025/05/08","贷款到期日":"2025/11/07","贷款用途":"支付货款","担保情况":"信用"},
+      {"合同编号":"XXX202500069","贷款种类":"2010","币种":"人民币","贷款金额":"9,000,000","贷款余额":"9,000,000","贷款起始日":"2025/04/10","贷款到期日":"2025/10/10","贷款用途":"支付货款","担保情况":"信用"},
+      {"合同编号":"XXX202500061","贷款种类":"2010","币种":"人民币","贷款金额":"14,800,000","贷款余额":"14,800,000","贷款起始日":"2025/04/07","贷款到期日":"2025/10/07","贷款用途":"支付货款","担保情况":"信用"}
+    ];
+
+    const businessChangeRows = [
+      {"变更日期":"2026/3/18","变更事项":"法定代表人变更","变更前内容":"李某某","变更后内容":"周某某"},
+      {"变更日期":"2025/8/5","变更事项":"监事备案变更","变更前内容":"张某","变更后内容":"王某"},
+      {"变更日期":"2025/6/24","变更事项":"高级管理人员备案变更","变更前内容":"总经理李某某","变更后内容":"总经理陈某某"}
+    ];
+
+    const actualControllerLitigationRows = [
+      {"被告":"李某某","案号":"（2026）XXXXX民初XXX号","案由":"股权转让纠纷","立案时间":"2026/2/21","涉案金额":"1,860万元","审理流程":"民事一审"}
+    ];
+
+    const creditCompareRows = [
+      {"银行名称":"XX银行（本行）","上期授信额度（万元）":"5,000","本期授信额度（万元）":"5,000","变动幅度":"0%","变动原因（企业说明）":"—"},
+      {"银行名称":"中国XX银行泰兴支行","上期授信额度（万元）":"2,500","本期授信额度（万元）":"1,800","变动幅度":"-28.0%","变动原因（企业说明）":"因抵押物重新评估价值下降，续贷未足额批复"},
+      {"银行名称":"XX农商行","上期授信额度（万元）":"1,200","本期授信额度（万元）":"800","变动幅度":"-33.3%","变动原因（企业说明）":"企业经营下滑，主动压缩"},
+      {"银行名称":"其他城商行合计","上期授信额度（万元）":"800","本期授信额度（万元）":"800","变动幅度":"0%","变动原因（企业说明）":"无变化"},
+      {"银行名称":"他行合计（不含本行）","上期授信额度（万元）":"4,500","本期授信额度（万元）":"3,440","变动幅度":"-23.5%","变动原因（企业说明）":"—"}
+    ];
+
+    const creditStructureRows = [
+      {"项目":"本行授信余额（万元）","上期（2025年1月）":"3,800","本期（2025年5月）":"4,520","变化":"+720"},
+      {"项目":"他行授信余额（万元）","上期（2025年1月）":"4,500","本期（2025年5月）":"2,540","变化":"-1,960"},
+      {"项目":"非银机构融资（万元）","上期（2025年1月）":"0","本期（2025年5月）":"1,500","变化":"+1,500"},
+      {"项目":"企业总有息负债（万元）","上期（2025年1月）":"8,300","本期（2025年5月）":"8,560","变化":"+260"},
+      {"项目":"本行余额占比","上期（2025年1月）":"45.8%","本期（2025年5月）":"52.8%","变化":"+7.0%"},
+      {"项目":"本行余额占银行融资比例（剔除非银）","上期（2025年1月）":"45.8%","本期（2025年5月）":"64.0%","变化":"+18.2%"}
+    ];
+
+    const creditChangeRows = [
+      {"融资类型":"本行信用贷款","年初余额（万元）":"3,000","本期余额（万元）":"4,520","增加额（万元）":"+1,520","增幅":"+50.7%"},
+      {"融资类型":"他行银行贷款","年初余额（万元）":"3,800","本期余额（万元）":"2,540","增加额（万元）":"-1,260","增幅":"-33.2%"},
+      {"融资类型":"非银机构融资","年初余额（万元）":"0","本期余额（万元）":"1,500","增加额（万元）":"+1,500","增幅":"—"},
+      {"融资类型":"小计（银行+非银）","年初余额（万元）":"6,800","本期余额（万元）":"8,560","增加额（万元）":"+1,760","增幅":"+25.9%"},
+      {"融资类型":"其中：非循环额度使用率","年初余额（万元）":"90%","本期余额（万元）":"100%","增加额（万元）":"已用尽","增幅":"—"}
+    ];
+
+    const nonBankFinanceRows = [
+      {"非银机构名称":"XX融资租赁有限公司","融资金额（万元）":"1,500","融资类型":"售后回租（设备）","年化利率":"9.8%","期限":"2年","担保方式":"机器设备抵押+张某某保证","资金用途（企业表述）":"补充流动资金"}
+    ];
+
+    const financeIndicatorRows = [
+      {"财务指标":"营业收入（同期）","上期贷后值":"8,987,810,621.71","本期值":"5,076,537,516.55","变化":"↓43.5%"},
+      {"财务指标":"应收账款","上期贷后值":"44,234,592.58","本期值":"50,138,491.91","变化":"↑13.3%"},
+      {"财务指标":"存货","上期贷后值":"391,363,095.42","本期值":"481,924,476.08","变化":"↑23.1%"},
+      {"财务指标":"资产负债率","上期贷后值":"0.65","本期值":"0.75","变化":"+10ppt"},
+      {"财务指标":"利润率（同期）","上期贷后值":"0.00","本期值":"0.01","变化":"—"},
+      {"财务指标":"短期借款+长期借款+一年内到期非流动负债","上期贷后值":"130,609,781.16","本期值":"151,652,692.11","变化":"↑16.1%"},
+      {"财务指标":"现金及现金等价物净增加额","上期贷后值":"-18,394,298.60","本期值":"128,283,340.56","变化":"由负转正"},
+      {"财务指标":"经营活动产生的现金流量净额","上期贷后值":"—","本期值":"627,962,013.24","变化":"—"},
+      {"财务指标":"长期股权投资","上期贷后值":"—","本期值":"0.00","变化":"—"}
+    ];
+
+    const socialSecurityRows = [
+      {"指标":"社保缴纳人数（人）","本期（2025年1-4月均值）":"320","上年同期（2024年1-4月）":"350","同比变化":"-8.6%","说明":"减少30人，无集中裁员"},
+      {"指标":"社保缴纳金额（万元/月）","本期（2025年1-4月均值）":"42.5","上年同期（2024年1-4月）":"46.8","同比变化":"-9.2%","说明":"人均社保基数略降"},
+      {"指标":"公积金缴纳人数（人）","本期（2025年1-4月均值）":"285","上年同期（2024年1-4月）":"310","同比变化":"-8.1%","说明":"与社保趋势一致"}
+    ];
+
+    const customsRows = [
+      {"指标":"出口额（万美元）","本期（2025年1-4月累计）":"680","上年同期（2024年1-4月）":"1,040","同比变化":"-34.7%","说明":"下降明显"},
+      {"指标":"进口额（万美元）","本期（2025年1-4月累计）":"420","上年同期（2024年1-4月）":"580","同比变化":"-27.6%","说明":"同步回落"}
+    ];
+
+    const utilityRows = [
+      {"指标":"电费（万元）","本期（2025年1-4月累计）":"138","上年同期（2024年1-4月）":"178","同比变化":"-22.4%","说明":"降幅显著"},
+      {"指标":"燃气费（万元）","本期（2025年1-4月累计）":"31","上年同期（2024年1-4月）":"42","同比变化":"-26.2%","说明":"主要热加工工艺减少"},
+      {"指标":"水费（万元）","本期（2025年1-4月累计）":"11","上年同期（2024年1-4月）":"12","同比变化":"-8.3%","说明":"相对平稳"}
+    ];
+
+    const taxSalesRows = [
+      {"项目":"纳税申报总销售额（万元）","本期（2025年1-4月）":"4,850","上年同期（2024年1-4月）":"8,200","同比变化":"-40.82%"},
+      {"项目":"本部报表营业收入（万元）","本期（2025年1-4月）":"4,620","上年同期（2024年1-4月）":"7,950","同比变化":"-41.89%"},
+      {"项目":"差额（申报－报表，万元）","本期（2025年1-4月）":"230","上年同期（2024年1-4月）":"-250","同比变化":"方向逆转"},
+      {"项目":"差异率（以报表为分母）","本期（2025年1-4月）":"4.98%","上年同期（2024年1-4月）":"-3.14%","同比变化":"—"}
+    ];
+
+    const taxMatchRows = [
+      {"科目":"营业收入","账面值（万元）":"4,620","税务申报/推算值（万元）":"4,850（申报额）","差异率":"4.98%","匹配评价":"需核实口径"},
+      {"科目":"应收账款","账面值（万元）":"3,200","税务申报/推算值（万元）":"3,080（按销项税倒推）","差异率":"-3.75%","匹配评价":"匹配良好"},
+      {"科目":"存货","账面值（万元）":"2,800","税务申报/推算值（万元）":"2,650（按进项税及成本率推算）","差异率":"-5.36%","匹配评价":"基本匹配"},
+      {"科目":"借款类负债","账面值（万元）":"8,500","税务申报/推算值（万元）":"8,500（征信报告）","差异率":"0%","匹配评价":"完全一致"},
+      {"科目":"经营现金流（净额）","账面值（万元）":"520","税务申报/推算值（万元）":"与申报趋势一致","差异率":"—","匹配评价":"无明显背离"},
+      {"科目":"税前利润","账面值（万元）":"860","税务申报/推算值（万元）":"980（按所得税申报还原）","差异率":"12.94%","匹配评价":"显著偏高，重点核查"}
+    ];
+
+    const taxProfitRows = [
+      {"可能原因":"成本费用税会差异","具体表现":"账面计提资产减值损失、坏账准备或预提费用，税务未允许扣除","风险等级":"中"},
+      {"可能原因":"收入确认时点差异","具体表现":"提前开票确认收入但未结转相应成本，导致账面利润偏低","风险等级":"中高"},
+      {"可能原因":"跨期费用调整","具体表现":"大额费用实际支付与税务扣除时间错配","风险等级":"中"},
+      {"可能原因":"数据录入错误","具体表现":"所得税申报表或财务报表填报失误","风险等级":"低"}
+    ];
+
+    const settlementOverviewRows = [
+      {"月份":"前三个月","当月账户流入量":"5219.24","当月账户流出量":"3858.50","月末账户余额":"1847.44"},
+      {"月份":"前两个月","当月账户流入量":"6707.82","当月账户流出量":"3884.68","月末账户余额":"4670.59"},
+      {"月份":"前一个月","当月账户流入量":"4253.81","当月账户流出量":"6268.40","月末账户余额":"2637.99"}
+    ];
+
+    const settlementCompareRows = [
+      {"月份":"2025.6","结算回笼":"6178.65","开票金额":"13809.87","占比":"44.74%","环比":"10%↓","同比":"15%↓"},
+      {"月份":"2025.7","结算回笼":"8063.56","开票金额":"17463.31","占比":"46.17%","环比":"12%↓","同比":"11%↓"},
+      {"月份":"2025.8","结算回笼":"8362.25","开票金额":"17710.64","占比":"47.21%","环比":"6%↓","同比":"10%↑"},
+      {"月份":"合计","结算回笼":"22605.46","开票金额":"48983.82","占比":"46.14%","环比":"10%↓","同比":"12%↓"}
+    ];
+
+    const downstreamJudicialRows = [
+      {"序号":"1","客户名称（脱敏）":"华东精密科技（泰州）有限公司","案由":"买卖合同纠纷","涉案金额（万元）":"860","案件阶段":"一审审理中","与企业交易内容":"智能检测设备","近12个月交易额（万元）":"1,240","风险传导路径":"货款回收延迟，已逾期90天以上"},
+      {"序号":"2","客户名称（脱敏）":"常州XX新能源装备有限公司","案由":"票据追索权纠纷","涉案金额（万元）":"790","案件阶段":"执行立案","与企业交易内容":"自动化产线集成","近12个月交易额（万元）":"980","风险传导路径":"票据到期无法兑付，企业已转为应收账款"},
+      {"序号":"3","客户名称（脱敏）":"苏州工业园区XX电子有限公司","案由":"买卖合同纠纷+限制高消费","涉案金额（万元）":"500","案件阶段":"终本执行 / 限高","与企业交易内容":"工业机器人","近12个月交易额（万元）":"620","风险传导路径":"客户已被限制高消费，回款难度极大"}
+    ];
+
+    const upstreamJudicialRows = [
+      {"序号":"1","供应商名称（脱敏）":"无锡XX精密机械有限公司","案由":"票据纠纷 + 承揽合同纠纷","涉案金额（万元）":"580","案件阶段":"一审+执行","与企业采购内容":"机械加工件、钣金件","近12个月采购额（万元）":"1,450","风险传导路径":"供应商资金链紧张，已出现延期交货及要求预付款"},
+      {"序号":"2","供应商名称（脱敏）":"常州XX模具有限公司","案由":"买卖合同纠纷（被告）","涉案金额（万元）":"390","案件阶段":"审理中","与企业采购内容":"模具及工装","近12个月采购额（万元）":"870","风险传导路径":"涉诉导致信用受损，企业正在寻找替代供应商，采购成本上升"}
+    ];
+
+    const judicialImpactRows = [
+      {"风险维度":"资金周转","下游影响":"应收账款逾期增加，预计新增逾期800-1,200万元","上游影响":"预付款及现款结算增加，额外占用资金约400万元","综合风险":"双重挤压，流动资金压力显著加大"},
+      {"风险维度":"订单稳定性","下游影响":"3家客户可能减少或取消后续订单，预计年收入损失约2,500万元","上游影响":"若供应商出现停产，影响企业交付能力，间接损失订单","综合风险":"经营规模进一步收缩"},
+      {"风险维度":"产品/材料成本","下游影响":"—","上游影响":"更换高价供应商或加急采购，成本预计上升5%-8%","综合风险":"毛利率承压"},
+      {"风险维度":"信用形象","下游影响":"下游客户违约可能传导至银行征信及商业信用评价","上游影响":"供应商涉诉可能被误认为企业自身问题","综合风险":"外部合作意愿下降"}
+    ];
+
+    const propertyStatusRows = [
+      {"字段":"抵押物坐落","核查结果":"上海市浦东新区XX路188号1幢办公楼"},
+      {"字段":"不动产权证号","核查结果":"沪（2020）浦字不动产权第XXXXXX号"},
+      {"字段":"登记机关","核查结果":"上海市浦东新区不动产登记事务中心"},
+      {"字段":"我行抵押登记证明号","核查结果":"沪（2022）浦字不动产证明第YYYYYY号"},
+      {"字段":"抵押顺位","核查结果":"第一顺位最高额抵押"},
+      {"字段":"最高额抵押担保金额","核查结果":"5,000万元"},
+      {"字段":"登记状态","核查结果":"持续有效（截至查询日2025年5月10日）"},
+      {"字段":"登记有效期","核查结果":"2022年3月15日至2027年3月14日"}
+    ];
+
+    const propertyNewRightsRows = [
+      {"字段":"新增抵押顺位","核查结果":"第二顺位"},
+      {"字段":"抵押权人","核查结果":"XX金融租赁有限公司"},
+      {"字段":"担保债权金额","核查结果":"1,500万元"},
+      {"字段":"登记日期","核查结果":"2025年3月20日"},
+      {"字段":"登记证明号","核查结果":"沪（2025）浦字不动产证明第ZZZZZZ号"},
+      {"字段":"是否影响我行优先受偿权","核查结果":"不影响第一顺位效力，但处置后剩余价值优先分配给他方"}
+    ];
+
+    const propertySealRows = [
+      {"字段":"查封类型","核查结果":"轮候查封"},
+      {"字段":"查封法院","核查结果":"上海市浦东新区人民法院"},
+      {"字段":"案号","核查结果":"（2025）沪0115执恢3XXX号"},
+      {"字段":"申请执行人","核查结果":"苏州XX贸易有限公司"},
+      {"字段":"案由","核查结果":"买卖合同纠纷"},
+      {"字段":"查封日期","核查结果":"2025年4月15日"},
+      {"字段":"查封期限","核查结果":"三年（自2025年4月15日至2028年4月14日）"},
+      {"字段":"是否影响我行抵押权","核查结果":"轮候查封不影响已登记抵押权的优先受偿，但增加处置变现的时间和程序成本"}
+    ];
+
+    const propertyValueRows = [
+      {"字段":"评估/参考单价（元/㎡）","授信初期（2024年3月）":"41,000","当前（2025年5月）":"35,500","变化":"-13.40%"},
+      {"字段":"建筑面积（㎡）","授信初期（2024年3月）":"2,000","当前（2025年5月）":"2,000","变化":"—"},
+      {"字段":"总估值（万元）","授信初期（2024年3月）":"8,200","当前（2025年5月）":"7,100","变化":"-1,100万元"},
+      {"字段":"估值依据","授信初期（2024年3月）":"第三方评估报告（XX评估公司，报告编号XXX2024-023）","当前（2025年5月）":"同区域可比成交案例（浦东XX广场、XX国际中心近3个月成交均价）","变化":"—"},
+      {"字段":"我行抵押担保覆盖情况","授信初期（2024年3月）":"覆盖授信敞口4,520万元的1.81倍","当前（2025年5月）":"覆盖授信敞口4,520万元的1.57倍","变化":"安全边际下降0.24倍"}
+    ];
+
+    const fundFlowRows = [
+      {"步骤":"1","日期":"2025/4/10","付款方":"江苏xx制造有限公司（借款人）","收款方":"无锡XX精密机械有限公司（上游供应商）","金额（万元）":"900","备注":"贷款发放"},
+      {"步骤":"2","日期":"2025/4/11","付款方":"无锡XX精密机械有限公司","收款方":"上海XX贸易有限公司","金额（万元）":"850","备注":"留存50万元"},
+      {"步骤":"3","日期":"2025/4/13","付款方":"上海XX贸易有限公司","收款方":"张某某（实际控制人个人账户）","金额（万元）":"800","备注":"留存50万元"}
+    ];
+
+    const graphNodeRows = [
+      {"节点":"江苏YY科技有限公司","关系":"通过陈某某间接关联，行内黑名单（已核销）","风险含义":"借款人未披露与黑名单客户的关联，存在隐性信用风险"},
+      {"节点":"泰州ZZ精密工业有限公司","关系":"行内另一授信客户，其担保人为陈某某","风险含义":"陈某某同时服务于两家企业，形成担保链交叉"},
+      {"节点":"陈某某","关系":"外部顾问，与借款人有资金往来及授权签字记录","风险含义":"关键连接点，可能隐瞒实际控制或代持关系"}
+    ];
+
+    const investigationRows = [
+      {"序号":"1","管理环节":"贷前","责任部门/岗位":"客户经理","管理类型":"合同规范落实条件","具体内容":"根据政采合同约定的最迟交货期、采购部门实际回款周期及内部审批流程、历史回款记录等因素，合理厘定单笔融资期限，确保期限与订单执行及回款周期匹配。"},
+      {"序号":"2","管理环节":"贷前","责任部门/岗位":"客户经理","管理类型":"信用风险预警与处置","具体内容":"办理业务前核实借款人是否被列入政府采购供应商黑名单；核查公司对已签订政采订单的履约能力，防止超出能力接单导致合同无法履行。"},
+      {"序号":"3","管理环节":"贷后","责任部门/岗位":"客户经理","管理类型":"信用风险预警与处置","具体内容":"密切跟踪借款人政府采购订单中标情况、订单实际执行进度（排产、交付、验收、收款各节点）；如出现延期、变更、取消或验收不通过等异常情形，2个工作日内书面报告。"},
+      {"序号":"4","管理环节":"贷后","责任部门/岗位":"客户经理","管理类型":"还款来源落实条件","具体内容":"关注下游采购方的履约能力、账款质量及回笼期限；若验收不通过或财政资金拨付延迟，提示企业防范经营风险，并要求其制定自筹资金还款计划。"},
+      {"序号":"5","管理环节":"贷后","责任部门/岗位":"客户经理","管理类型":"还款来源落实条件","具体内容":"督促借款人开立我行政采回款专用监管账户，确保采购方货款直接划入该账户；要求借款人收到买方付款后优先用于归还我行订单融资，每月核对回款流水。"},
+      {"序号":"6","管理环节":"贷后","责任部门/岗位":"客户经理","管理类型":"信用风险预警与处置","具体内容":"每季度获取借款人、主要股东（XX控股集团有限公司、张某某）及实际控制人（张某某）的最新征信报告；若出现逾期、欠息、关注等不良记录，立即停止授信使用并收回已发放融资。"},
+      {"序号":"7","管理环节":"贷后","责任部门/岗位":"客户经理、风险经理","管理类型":"担保缓释落实条件","具体内容":"若实际控制人及配偶为我行个人业务客户，将其在我行开立的全部个人账户、个人理财业务纳入贷后监管；如公司出现逾期或欠息，立即冻结其个人账户并采取保全措施。"},
+      {"序号":"8","管理环节":"贷后","责任部门/岗位":"客户经理","管理类型":"还款来源落实条件","具体内容":"如因政府因素导致订单货款未能及时支付，监督借款人及时筹集其他资金，保证按时归还我行到期贷款本息。"},
+      {"序号":"9","管理环节":"贷后","责任部门/岗位":"客户经理","管理类型":"合同规范落实条件","具体内容":"按照某银办发〔2019〕号《**》及我行公司客户贷后管理办法，定期进行财务分析，说明结算量变化情况；出现经营恶化或其他影响信贷安全的不利情况，及时采取措施并书面报告。"}
+    ];
+
+    const managementListRows = [
+      {"序号":"1","管理要求":"资金监管账户开立","具体内容":"在XX银行开立专用监管账户，用于归集全部销售回款","执行标准":"账户开立且已备案","责任方":"借款人","完成时限":"2025年1月31日"},
+      {"序号":"2","管理要求":"月度资金归集率","具体内容":"每月通过监管账户归集的销售回款 ≥ 当月营业收入的80%","执行标准":"以增值税纳税申报销售额为分母，账户收款金额为分子","责任方":"借款人","完成时限":"每月末"},
+      {"序号":"3","管理要求":"财务资料报送","具体内容":"每季度末后10个工作日内报送财务报表及增值税申报表","执行标准":"报送及时性、完整性","责任方":"借款人","完成时限":"每季度"},
+      {"序号":"4","管理要求":"抵押他项权证续办","具体内容":"原抵押登记到期前1个月内完成续办及变更登记","执行标准":"取得新的不动产登记证明","责任方":"借款人","完成时限":"2025年2月28日"}
+    ];
+
+    const managementCollectionRows = [
+      {"月份":"2025年1月","账户收款金额（万元）":"1,520","当期营业收入（万元）*":"1,800","归集率":"84.40%","批复要求":"≥80%","达标情况":"达标"},
+      {"月份":"2025年2月","账户收款金额（万元）":"1,180","当期营业收入（万元）*":"1,420","归集率":"83.10%","批复要求":"≥80%","达标情况":"达标"},
+      {"月份":"2025年3月","账户收款金额（万元）":"890","当期营业收入（万元）*":"1,435","归集率":"62.00%","批复要求":"≥80%","达标情况":"不达标"},
+      {"月份":"2025年4月","账户收款金额（万元）":"720","当期营业收入（万元）*":"1,309","归集率":"55.00%","批复要求":"≥80%","达标情况":"不达标"}
+    ];
+
+    const warningSummaryRows = [
+      {"预警编号":"W-2025-04-05","预警时间":"2025/4/10","预警类型":"资金归集率不达标（首期）","预警信号描述":"2025年3月资金监管账户归集率62%，低于批复要求80%","数据来源":"账户流水、增值税纳税申报表","风险等级":"黄色"},
+      {"预警编号":"W-2025-04-12","预警时间":"2025/5/9","预警类型":"同类预警连续发生","预警信号描述":"2025年4月资金监管账户归集率55%，连续2个月未达标","数据来源":"账户流水、增值税纳税申报表","风险等级":"橙色"}
+    ];
+
+    const warningOpinionRows = [
+      {"预警编号":"W-2025-04-05","终审意见（排除常规表述）":"风险关注点：资金归集率首次不达标，第一还款来源监控有效性下降；叠加前期收入下滑趋势，需防范企业挪用销售回款或体外循环风险。处置要求：客户经理督促企业限期提交归集率不达标的书面原因，并制定后续整改计划；次月（4月）归集率需恢复至80%以上，否则升级橙色预警并约谈客户。","处置要求":"3个工作日内提供3月回款账户明细及未归集资金去向说明；4月30日前确保归集率达标；若4月仍不达标，启动合同条款约谈。","执行进展":"企业已提供说明：部分大客户改为票据结算导致未进入监管账户；4月实际归集率55%，连续第二次不达标，待约谈整改。"}
+    ];
+
+    const customerBackgroundBasicRows = [
+      {"项目":"产业链","内容":"上游：钢材/塑料供应商；中游：机械零部件制造；下游：汽车主机厂（一级供应商）"},
+      {"项目":"市场地位","内容":"本地细分市场占有率约12%，排名第5；主要竞品为A公司（市占21%）"},
+      {"项目":"商业模式","内容":"B2B直销+少量经销，按订单生产，账期90天，无长协"},
+      {"项目":"盈利模式","内容":"赚取加工费（成本加成15%），毛利率约18%，净利率约5%"},
+      {"项目":"首贷日期","内容":"2022/3/15"},
+      {"项目":"最新批复日期","内容":"2025/8/10"},
+      {"项目":"用信余额（当前）","内容":"1,560 万元（截至2026-05-10）"},
+      {"项目":"用信余额（上次贷后）","内容":"1,820 万元（截至2025-11-20）"}
+    ];
+
+    const customerBackgroundEventRows = [
+      {"时间点":"2022/3/15","大事件描述":"首贷发生：首次发放流贷300万元"},
+      {"时间点":"2024/8/10","大事件描述":"实控人涉诉：因民间借贷纠纷被法院强制执行45万元"},
+      {"时间点":"2025/1/15","大事件描述":"开工率骤降：月均用电量同比下降40%（从8.5万度降至5.1万度）"},
+      {"时间点":"2025/3/20","大事件描述":"纳税评级下调：由B级下调至M级，实缴增值税同比-38%"},
+      {"时间点":"2025/6/10","大事件描述":"核心客户流失：原第一大客户A公司（占营收32%）停止合作"},
+      {"时间点":"2025/8/10","大事件描述":"最新授信批复：授信续期，额度由1800万元增至2000万元"},
+      {"时间点":"2025/9/5","大事件描述":"他行抽贷：建行抽贷800万元，他行总授信由6000万降至5200万"},
+      {"时间点":"2025/11/1","大事件描述":"高管离职：财务总监离职，截至2026年3月仍未到岗（空窗期4个月）"},
+      {"时间点":"2025/12/20","大事件描述":"环保处罚：因VOCs排放超标被罚款25万元，整改验收未完成"},
+      {"时间点":"2026/1/10","大事件描述":"抵押物劣后：厂房及土地新增二顺位抵押给融资租赁公司"},
+      {"时间点":"2026/2/15","大事件描述":"对外担保代偿：触发代偿150万元（担保对象为实控人亲属企业）"},
+      {"时间点":"2026/3/20","大事件描述":"回款恶化：近6个月基本户日均存款同比-41%，月均净流入同比-52%"}
+    ];
+
+    function escapeHtml(value){
+      return String(value ?? "")
+        .replaceAll("&","&amp;")
+        .replaceAll("<","&lt;")
+        .replaceAll(">","&gt;")
+        .replaceAll('"',"&quot;")
+        .replaceAll("'","&#39;");
+    }
+
+    function riskPill(value){
+      const v = String(value || "");
+      if(v.includes("红")) return `<span class="risk-pill risk-red">${escapeHtml(v)}</span>`;
+      if(v.includes("橙")) return `<span class="risk-pill risk-orange">${escapeHtml(v)}</span>`;
+      if(v.includes("黄")) return `<span class="risk-pill risk-yellow">${escapeHtml(v)}</span>`;
+      return escapeHtml(v);
+    }
+
+    function tableHTML(rows, className="", options={}){
+      const list = Array.isArray(rows) ? rows : [];
+      if(!list.length) return '<p class="empty-state">暂无表格数据。</p>';
+
+      const headers = [];
+      const seen = new Set();
+      list.forEach(row => Object.keys(row).forEach(key => {
+        if(!seen.has(key)){
+          seen.add(key);
+          headers.push(key);
+        }
+      }));
+
+      return `
+        <div class="table-wrap ${className}">
+          <table>
+            ${options.noHead ? "" : `<thead><tr>${headers.map(h => `<th>${escapeHtml(h)}</th>`).join("")}</tr></thead>`}
+            <tbody>
+              ${list.map(row => `
+                <tr>
+                  ${headers.map(h => {
+                    const raw = row[h] == null || row[h] === "" ? "—" : row[h];
+                    if(options.riskColumn && h === options.riskColumn) return `<td>${riskPill(raw)}</td>`;
+                    return `<td>${escapeHtml(raw)}</td>`;
+                  }).join("")}
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    function kvTableHTML(rows){
+      return `
+        <div class="table-wrap kv-compact">
+          <table style="min-width:0;">
+            <tbody>
+              ${rows.map(row => `
+                <tr>
+                  <td class="kv-key">${escapeHtml(row.项目 || "")}</td>
+                  <td>${escapeHtml(row.内容 || "—")}</td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    function basicInfoGridHTML(rows){
+      const list = Array.isArray(rows) ? rows : [];
+      const longKeys = new Set(["主营业务","股东","注册地址","基本开户行","主要结算行","产业链","市场地位","商业模式","盈利模式","用信余额（当前）","用信余额（上次贷后）"]);
+      const htmlParts = [];
+      let buffer = [];
+
+      const pushPairRow = items => {
+        htmlParts.push(`
+          <tr>
+            <td class="kv-key">${escapeHtml(items[0].项目)}</td>
+            <td>${escapeHtml(items[0].内容)}</td>
+            <td class="kv-key">${escapeHtml(items[1].项目)}</td>
+            <td>${escapeHtml(items[1].内容)}</td>
+          </tr>
+        `);
+      };
+
+      const flushBuffer = () => {
+        if(buffer.length === 2){
+          pushPairRow(buffer);
+        }else if(buffer.length === 1){
+          htmlParts.push(`
+            <tr>
+              <td class="kv-key">${escapeHtml(buffer[0].项目)}</td>
+              <td colspan="3">${escapeHtml(buffer[0].内容)}</td>
+            </tr>
+          `);
+        }
+        buffer = [];
+      };
+
+      list.forEach(item => {
+        if(longKeys.has(item.项目) || String(item.内容 || "").length > 28){
+          flushBuffer();
+          htmlParts.push(`
+            <tr>
+              <td class="kv-key">${escapeHtml(item.项目)}</td>
+              <td colspan="3">${escapeHtml(item.内容)}</td>
+            </tr>
+          `);
+        }else{
+          buffer.push(item);
+          if(buffer.length === 2) flushBuffer();
+        }
+      });
+
+      flushBuffer();
+
+      return `
+        <div class="table-wrap kv-compact">
+          <table style="min-width:0;">
+            <tbody>${htmlParts.join("")}</tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    function accordionHTML(title, body, open=true){
+      return `
+        <details class="right-accordion"${open ? " open" : ""}>
+          <summary>${escapeHtml(title)}</summary>
+          <div class="right-accordion-body">${body}</div>
+        </details>
+      `;
+    }
+
+    function fakeChecksHTML(){
+      return `
+        <div class="fake-check-wrap">
+          <label class="fake-chip"><input type="checkbox" checked> 上一期贷后</label>
+          <label class="fake-chip"><input type="checkbox"> 去年同期</label>
+          <label class="fake-chip"><input type="checkbox"> 审批</label>
+          <label class="fake-chip"><input type="checkbox"> 放贷</label>
+        </div>
+      `;
+    }
+
+    function sourceBlockHTML(block){
+      return `
+        <section class="source-block">
+          <h4>${escapeHtml(block.name)}</h4>
+          ${block.fakeChecks ? fakeChecksHTML() : ""}
+          ${block.html || ""}
+          ${block.data ? tableHTML(block.data) : ""}
+        </section>
+      `;
+    }
+
+    function financeDeepAnalysisHTML(){
+      return `
+        ${accordionHTML("6.1财务指标趋势分析（示例）", `
+          ${fakeChecksHTML()}
+          ${tableHTML(financeIndicatorRows)}
+          <p>注：“授信审批时”“首次放款时”列请按实际数据填入，上述分析暂以“上期贷后值”为基准进行趋势解读。</p>
+        `, true)}
+        ${accordionHTML("6.2财务分析", `
+          <p>经分析，本期财务数据呈现以下值得关注的变化：</p>
+          <p>营收同比下降约43.5%，同期存货增长23.1%、应收账款增长13.3%。三项指标同向变化，或指向产品变现速度放缓及回款周期拉长。资产负债率由65%升至75%，债务杠杆明显加重，叠加用信余额仍在增长，该企业的资金运转对外部融资依赖程度较高。</p>
+          <p>经营现金流净额由负转正至6.28亿元，同期短期借款增加约2,100万元。上述现金流的改善是否源于主业经营改善、应收账款催收还是短期资金调度，需结合银行流水进一步核实后方可定论，不宜直接认定为经营实质好转。</p>
+          <p>结合上下游涉诉及资金归集率持续不达标的背景，本笔认为：该企业目前资金链偏紧，回款端面临较大压力，整体偿债能力有所弱化。</p>
+          <p>与税务数据交叉比对后发现两处差异，需进一步核实：</p>
+          <p>其一，收入确认方向出现反转。本期申报销售额高于报表收入230万元（差异率+4.98%），上年同期方向相反、差额250万元（差异率-3.14%）。方向反转通常意味着收入确认时点或开票节奏存在调整，需排查是否存在跨期调节行为。</p>
+          <p>其二，税前利润账税差异率达12.94%，远高于其他科目（均不超过±5.36%），差值主要来自成本费用端。该差异是否涉及成本跨期、调整或录入错误，需进一步查证。</p>
+          <p>建议实地走访时向企业财务索要近6个月银行对账单原件、本期及上年同期增值税申报表及财务报表、大额存货对应的订单及出库记录、主要欠款客户书面对账函，逐项核实。</p>
+        `, true)}
+      `;
+    }
+
+    function nationalDeepAnalysisHTML(){
+      return accordionHTML("7.1交叉验证分析", `
+        <p>2025年1-4月，该企业社保缴纳人数下降8.6%，电费下降22.4%，出口额下降34.7%，三项指标同步收缩。</p>
+        <p>上述指标同时下降，指向产能利用率下降及外贸订单流失。此外，本期用信余额较年初增长24.47%，而同期用电量下降22.4%，两者走势明显背离。若贷款资金确已进入生产经营，用电量的降幅难以解释；若未进入经营，则需进一步追溯资金实际流向。</p>
+        <p>用信增长与能耗下降的不匹配值得关注，建议在实地走访时就此向企业负责人提出问询，并要求提供本期新增授信资金的实际用途说明。</p>
+      `, true);
+    }
+
+    function taxDeepAnalysisHTML(){
+      return accordionHTML("8.1税务交叉分析", `
+        <p>经比对2025年1-4月税务申报数据与财务报表，本期申报销售额同比下降40.82%，与营收下降趋势基本一致，但存在两处差异需核实：</p>
+        <p>一是收入确认方向出现反转。本期申报销售额高于报表收入230万元（差异率+4.98%），上年同期则相反、差额250万元（差异率-3.14%）。该方向性变化可能涉及收入确认节奏调整或跨期调节，需结合合同、发票及资金流进行核实。</p>
+        <p>二是税前利润账税差异率达12.94%，远高于其他科目。若差异主要来自成本费用端，需排查是否存在成本跨期、调整或录入错误，可能对利润真实性产生影响。</p>
+        <p>建议走访时调阅企业账套，将银行流水、纳税申报表与合同发票做三单匹配，逐笔核实大额收支的真实性与合规性。</p>
+      `, true);
+    }
+
+    function judicialDeepAnalysisHTML(){
+      return `
+        ${accordionHTML("10.1下游核心客户司法风险明细", tableHTML(downstreamJudicialRows), true)}
+        ${accordionHTML("10.2上游核心供应商司法风险明细", tableHTML(upstreamJudicialRows), true)}
+        ${accordionHTML("10.3上下游司法风险交叉影响评估", tableHTML(judicialImpactRows), true)}
+      `;
+    }
+
+    function customerBackgroundHTML(){
+      return `
+        ${accordionHTML("一、基本信息", basicInfoGridHTML(customerBackgroundBasicRows), true)}
+        ${accordionHTML("二、大事件", tableHTML(customerBackgroundEventRows), true)}
+      `;
+    }
+
+    function knowledgeUnitHTML(){
+      return accordionHTML("知识单元", kvTableHTML(knowledgeUnitRows), true);
+    }
+
+    const provenanceMap = {
+      industryCommerce: [
+        { name: "4.1工商变更（示例）", data: businessChangeRows },
+        { name: "4.2实控人涉诉（示例）", data: actualControllerLitigationRows }
+      ],
+      credit: [
+        { name: "5.1他行授信额度变化对比", data: creditCompareRows },
+        { name: "5.2授信机构结构及本行占比", data: creditStructureRows },
+        { name: "5.3企业总融资变动明细（较年初）", data: creditChangeRows },
+        { name: "5.4新增非银机构融资明细", data: nonBankFinanceRows }
+      ],
+      finance: [
+        { name: "6.1财务指标趋势分析", data: financeIndicatorRows, fakeChecks: true },
+        { name: "6.2财务分析延展", html: `<p>注：“授信审批时”“首次放款时”列请按实际数据填入，上述分析暂以“上期贷后值”为基准进行趋势解读。</p><p>建议结合银行流水、税务申报及存货出库记录，对营收下降、存货增长、应收账款增长的联动关系做进一步核验。</p>` }
+      ],
+      national: [
+        { name: "7.1社保、公积金变化", data: socialSecurityRows },
+        { name: "7.2海关进出口情况", data: customsRows },
+        { name: "7.3水电气费用", data: utilityRows }
+      ],
+      tax: [
+        { name: "8.1纳税申报总销售额 vs 本部报表营业收入", data: taxSalesRows },
+        { name: "8.2重要科目匹配度", data: taxMatchRows },
+        { name: "8.3税前利润差异原因推断", data: taxProfitRows }
+      ],
+      settlement: [
+        { name: "9.1结算账户近三个月情况", data: settlementOverviewRows },
+        { name: "9.2结算回笼与开票金额对比", data: settlementCompareRows }
+      ],
+      judicial: [
+        { name: "10.1下游核心客户司法风险明细", data: downstreamJudicialRows },
+        { name: "10.2上游核心供应商司法风险明细", data: upstreamJudicialRows },
+        { name: "10.3上下游司法风险交叉影响评估", data: judicialImpactRows }
+      ],
+      property: [
+        { name: "11.1抵押登记状态", data: propertyStatusRows },
+        { name: "11.2授信后新增他项权利", data: propertyNewRightsRows },
+        { name: "11.3司法查封情况", data: propertySealRows },
+        { name: "11.4抵押物市场估值变化", data: propertyValueRows }
+      ],
+      graph: [
+        { name: "12.1资金回流（流水明细）", data: fundFlowRows },
+        { name: "12.2节点说明", data: graphNodeRows }
+      ],
+      investigation: [
+        { name: "13.1调查审查报告（溯源）", data: investigationRows }
+      ],
+      management: [
+        { name: "14.1批复管理要求清单", data: managementListRows },
+        { name: "14.2资金监管账户月度归集情况", data: managementCollectionRows }
+      ],
+      warning: [
+        { name: "15.1历史预警信号汇总", data: warningSummaryRows },
+        { name: "15.2终审意见及处置要求", data: warningOpinionRows }
+      ]
+    };
+
+    const sections = [
+      {
+        id: "overview",
+        title: "一、总体概览",
+        hasData: true,
+        supportsProvenance: false,
+        contentHtml: `
+          <div class="overview-box">
+            <p><strong>江苏xx制造有限公司当前已进入多重风险叠加阶段，需立即提级管控。</strong></p>
+            <p>该客户为民营专用设备制造企业，实际控制人张某某，本行为第一大授信行，信用贷款余额4,520万元已全部提满。本笔注意到以下核心变化：</p>
+            <p>一是融资渠道收窄。同期他行授信合计压降23.5%，新增非银融资1,500万元，非银成本高、条款严，选择该渠道融资通常意味着银行端已难以满足需求，融资成本上升已在预期之内。</p>
+            <p>二是经营指标全面承压。营收同比下降超40%，同期社保降8.6%、电费降22.4%、出口降34.7%，三项指标同步走弱，指向产能利用率下降和外销订单流失。</p>
+            <p>三是资金管控失效。归集率连续两月仅62%和55%，低于批复要求，且800万元贷款经流转后回流至实控人个人账户，资金实际用途与申报用途严重不符，贷款被挪作他用已成事实。</p>
+            <p>四是押品风险缓释能力弱化。抵押物新增第二顺位抵押及轮候查封，估值下降约13%，第一还款来源弱化的同时，第二还款来源保障也在削减。</p>
+            <p>五是产业链风险积累。上下游核心交易对手涉诉金额合计超3,100万元，下游客户已有终本执行记录，回款来源和供应链稳定性均承受较大压力。</p>
+            <p>六是治理层面存隐患。原法定代表人李某某新增涉诉1,860万元，案由为股权转让纠纷，企业治理变更后相关纠纷尚未平息，后续走向需持续跟踪。</p>
+            <p>总的来说，上述异常并非孤立显现。从资金挪用，到押品劣化，再到经营萎缩，最后沿产业链传导——这是一个逐步发酵的过程。同业已先于我行采取审慎行动，本行存在信息滞后风险，不宜继续按常规节奏推进。</p>
+            <p>建议本周完成实地走访，重点核查三件事：①800万元回流资金的完整去向；②非银融资的担保关系及实际用途；③归集率不达标的真实原因。同时启动压缩敞口或追加担保的可行性评估，本笔将据此向贷后管理委员会提请审议。</p>
+          </div>
+        `
+      },
+      {
+        id: "riskInsight",
+        title: "二、本次贷后风险洞察",
+        hasData: true,
+        supportsProvenance: false,
+        contentHtml: `
+          <div class="insight-box">
+            <h4>风险洞察</h4>
+            ${kvTableHTML(riskInsightBaseRows)}
+            <h4>推理分析</h4>
+            ${tableHTML(riskInsightReasonRows)}
+            <h4>触发条件</h4>
+            ${kvTableHTML(riskInsightTriggerRows)}
+          </div>
+        `
+      },
+      {
+        id: "basic",
+        title: "三、客户基本情况",
+        hasData: true,
+        supportsProvenance: false,
+        contentHtml: `
+          ${basicInfoGridHTML(basicInfoRows)}
+          <h4>用信记录</h4>
+          ${tableHTML(creditUsageRows)}
+          <p>江苏xx制造有限公司为民营控股专用设备制造企业，实际控制人张某某，当前法定代表人周某某，所属集团为XX控股集团有限公司。注册资本20,000万元（实缴15,000万元），首贷日期2021年6月，最新批复日期2025年3月。目前用信余额合计4,520万元（三笔信用贷款），均为流动资金贷款，用于支付货款。</p>
+        `
+      },
+      {
+        id: "industryCommerce",
+        title: "四、工商信息",
+        hasData: true,
+        supportsProvenance: true,
+        contentHtml: `
+          <p>本笔贷后管理期内，该企业法定代表人、总经理及监事发生集中变更，经营管理层与治理层变动较大。变更完成后，原法定代表人李某某随即新增涉诉1,860万元，案由为股权转让纠纷。</p>
+          <p>企业成立近十年、贷款余额尚有4,520万元未到期，核心管理层在此节点集体更换，且原法人随后陷入股权转让纠纷，或反映股东层面存在分歧或隐性债务关系，相关事项可能对后续生产经营及我行债权安全产生不利影响。建议本周安排实地走访，与新管理层建立联系，并就变更原因、后续经营安排等进行核实确认。</p>
+        `
+      },
+      {
+        id: "credit",
+        title: "五、征信信息",
+        hasData: true,
+        supportsProvenance: true,
+        contentHtml: `
+          <p>经核查，该企业本机构授信占比达82.80%，为第一大授信行。三笔信用贷款额度已100%提满，总融资规模较年初增长24.47%，同期营业收入同比下降，融资增速与经营趋势呈背离态势。</p>
+          <p>他行授信额度较上期下降超20%，同时新增非银机构融资。这一信号应予重视：他行在收缩，表明同业对该客户的审慎程度在上升；非银融资介入成本较高、条款较严，通常是企业融资渠道收窄后的替代选择。</p>
+          <p>上述融资变化与营收下降、用信扩张的组合值得警惕。两项待核实事项：一是新增非银融资的品种、金额及实际用途；二是实际控制人张某某是否为该笔非银融资提供个人连带担保——若存在该等情况，非银催收力度将显著大于银行，需评估对客户整体债务处置的影响。</p>
+          <p>融资渠道收窄：他行授信额度下降超20%，传统银行融资渠道出现明确收窄信号。</p>
+          <p>融资结构变化：企业转向非银渠道融资，预计融资成本上升，财务负担加重。</p>
+          <p>集中度风险突出：该企业对我行授信依赖度进一步上升，额度已全部用尽，风险集中度高。</p>
+          <p>流动性压力上升：融资规模持续增长而收入未见改善，短期资金周转缺口需持续关注。</p>
+        `
+      },
+      {
+        id: "finance",
+        title: "六、财务信息",
+        hasData: true,
+        supportsProvenance: true,
+        contentHtml: `
+          <h4>6.1 财务指标分析（单位：元）</h4>
+          ${tableHTML(financeIndicatorRows)}
+          <p>注：“授信审批时”“首次放款时”列请按实际数据填入，上述分析暂以“上期贷后值”为基准进行趋势解读。</p>
+          <h4>6.2 财务分析</h4>
+          <p>经分析，本期财务数据呈现以下值得关注的变化：</p>
+          <p>营收同比下降约43.5%，同期存货增长23.1%、应收账款增长13.3%。三项指标同向变化，或指向产品变现速度放缓及回款周期拉长。资产负债率由65%升至75%，债务杠杆明显加重，叠加用信余额仍在增长，该企业的资金运转对外部融资依赖程度较高。</p>
+          <p>经营现金流净额由负转正至6.28亿元，同期短期借款增加约2,100万元。上述现金流的改善是否源于主业经营改善、应收账款催收还是短期资金调度，需结合银行流水进一步核实后方可定论，不宜直接认定为经营实质好转。</p>
+          <p>结合上下游涉诉及资金归集率持续不达标的背景，本笔认为：该企业目前资金链偏紧，回款端面临较大压力，整体偿债能力有所弱化。</p>
+          <p>与税务数据交叉比对后发现两处差异，需进一步核实：</p>
+          <p>其一，收入确认方向出现反转。本期申报销售额高于报表收入230万元（差异率+4.98%），上年同期方向相反、差额250万元（差异率-3.14%）。方向反转通常意味着收入确认时点或开票节奏存在调整，需排查是否存在跨期调节行为。</p>
+          <p>其二，税前利润账税差异率达12.94%，远高于其他科目（均不超过±5.36%），差值主要来自成本费用端。该差异是否涉及成本跨期、调整或录入错误，需进一步查证。</p>
+          <p>建议实地走访时向企业财务索要近6个月银行对账单原件、本期及上年同期增值税申报表及财务报表、大额存货对应的订单及出库记录、主要欠款客户书面对账函，逐项核实。</p>
+          <p>财报整体评分处于中风险区间，近三年趋势由低风险恶化至中风险；可信度评分虽在低风险区间，但子维度存在高风险异常，建议结合银行流水进行交叉验证。</p>
+        `
+      },
+      {
+        id: "national",
+        title: "七、国发信息",
+        hasData: true,
+        supportsProvenance: true,
+        contentHtml: `
+          <p>2025年1-4月，该企业社保缴纳人数下降8.6%，电费下降22.4%，出口额下降34.7%，三项指标同步收缩。</p>
+          <p>上述指标同时下降，指向产能利用率下降及外贸订单流失。此外，本期用信余额较年初增长24.47%，而同期用电量下降22.4%，两者走势明显背离。若贷款资金确已进入生产经营，用电量的降幅难以解释；若未进入经营，则需进一步追溯资金实际流向。</p>
+          <p>用信增长与能耗下降的不匹配值得关注，建议在实地走访时就此向企业负责人提出问询，并要求提供本期新增授信资金的实际用途说明。</p>
+        `
+      },
+      {
+        id: "tax",
+        title: "八、税务信息",
+        hasData: true,
+        supportsProvenance: true,
+        contentHtml: `
+          <p>经比对2025年1-4月税务申报数据与财务报表，本期申报销售额同比下降40.82%，与营收下降趋势基本一致，但存在两处差异需核实：</p>
+          <p>一是收入确认方向出现反转。本期申报销售额高于报表收入230万元（差异率+4.98%），上年同期则相反、差额250万元（差异率-3.14%）。该方向性变化可能涉及收入确认节奏调整或跨期调节，需结合合同、发票及资金流进行核实。</p>
+          <p>二是税前利润账税差异率达12.94%，远高于其他科目。若差异主要来自成本费用端，需排查是否存在成本跨期、调整或录入错误，可能对利润真实性产生影响。</p>
+          <p>建议走访时调阅企业账套，将银行流水、纳税申报表与合同发票做三单匹配，逐笔核实大额收支的真实性与合规性。</p>
+        `
+      },
+      {
+        id: "settlement",
+        title: "九、结算信息",
+        hasData: true,
+        supportsProvenance: true,
+        contentHtml: `
+          <p>本笔贷后期间，该企业在我行经营性结算回笼同比下降10%，结算额仅占开票规模的46%。</p>
+          <p>46%的结算/开票比意味着企业对外开票金额近半数未通过我行账户回笼。需核实原因：下游账期是否显著拉长、企业是否存在他行结算、他行账户日常资金沉淀情况等。</p>
+          <p>归集率方面，2025年3月62%、4月55%，连续两个月低于批复要求的80%。</p>
+          <p>归集率持续不达标意味着企业资金优先权给了他行。结合结算/开票比偏低的情况，资金归集问题可能并非简单的操作问题，而反映了企业整体资金调度安排上的偏差。建议约谈企业财务负责人，了解归集率低的根本原因及整改方案，并核查他行账户的实际使用情况。</p>
+          ${tableHTML(settlementOverviewRows)}
+          ${tableHTML(settlementCompareRows)}
+        `
+      },
+      {
+        id: "judicial",
+        title: "十、司法信息",
+        hasData: true,
+        supportsProvenance: true,
+        contentHtml: `
+          <p>经核查，该企业核心上下游交易对手司法风险较为突出：</p>
+          <p>下游方面，3家核心客户涉诉金额合计约2,150万元，其中1家已进入终本执行阶段，相关应收账款回收难度较大。应收账款本已呈增长态势，下游客户涉诉将进一步加大回款压力。</p>
+          <p>上游方面，2家主要供应商涉诉金额合计约970万元。供应商涉诉若导致其资金紧张，可能影响原材料供应的连续性和采购账期安排。</p>
+          <p>上下游同时出现司法风险，对该企业的生产经营和应收账款管理均形成压力。建议实地走访时要求企业提供前五大欠款客户书面对账函，并了解主要供应商近期是否存在供货条件变化的情况。</p>
+        `
+      },
+      {
+        id: "property",
+        title: "十一、产权信息",
+        hasData: true,
+        supportsProvenance: true,
+        contentHtml: `
+          <p>经核查，该笔授信项下抵押物（上海市浦东新区XX路188号1幢办公楼）我行第一顺位最高额抵押登记持续有效。但本期出现以下三方面变化：</p>
+          <p>一是新增第二顺位抵押：抵押人于2025年3月将抵押物再次抵押给其他债权人，新增二押表明企业存在额外融资需求或资金紧张。</p>
+          <p>二是新增轮候查封：因第三方债务纠纷，抵押物被法院轮候查封，暂不影响我行优先受偿权，但处置障碍和时间成本有所增加。</p>
+          <p>三是押品价值下行：受区域办公楼市场行情影响，预计当前抵押物价值较授信初期下降12%-15%，第二还款来源的安全边际收窄。</p>
+          <p>上述三项变化叠加，二押和轮候查封反映出企业整体债务压力较重，抵押物的风险缓释能力已明显弱化。建议向企业发函问明二押债权金额、债权人及债务性质，并结合当前估值重新测算担保覆盖率。如二押金额较大，应启动追加担保品或压缩敞口程序。</p>
+        `
+      },
+      {
+        id: "graph",
+        title: "十二、图谱信息",
+        hasData: true,
+        supportsProvenance: true,
+        contentHtml: `
+          <p>经图谱系统及多源数据交叉分析，本期发现两项风险信号：</p>
+          <p>一是资金回流800万元。经追溯，该企业将800万元流动资金贷款通过上游供应商及贸易公司流转后，最终回流至实际控制人张某某个人账户。该笔资金流向与企业申报的贷款用途不符，已构成实质性的贷款挪用。需继续追查资金完整流向，搞清每跳资金的实际用途。</p>
+          <p>二是外部顾问陈某某存在关联风险。陈某某与行内已核销黑名单客户形成间接关联，同时为另一家行内授信客户提供个人担保。若被担保企业出现逾期，陈某某的资产和信用将受到冲击，存在担保圈链风险传导的可能。</p>
+          <p>本笔已采取及建议采取的行动：① 对800万资金流向进行完整追溯，编制资金链图谱；② 将陈某某关联关系信息上报合规部门评估；③ 暂停该客户新增授信审批，待资金流向核查完毕后再行评估。</p>
+        `
+      },
+      {
+        id: "investigation",
+        title: "十三、调查审查报告",
+        hasData: true,
+        supportsProvenance: true,
+        contentHtml: `${tableHTML(investigationRows)}`
+      },
+      {
+        id: "management",
+        title: "十四、批复后续管理要求落实情况",
+        hasData: true,
+        supportsProvenance: true,
+        contentHtml: `
+          <p>4项批复后续管理要求中，3项已落实：监管账户已开立、财务资料已按时报送、抵押他项权证已续办完成。</p>
+          <p>资金归集率要求未落实：2025年3月归集率62%，4月归集率55%，连续两个月低于80%的批复底线。</p>
+          <p>归集率持续不达标并非单纯的数字问题。资金归集率偏低的背后，可能是企业在用他行账户承接主要资金流出，已开立的监管账户未能发挥实质性管控作用。上一贷后周期已就该事项提出整改要求，本期同类问题再次发生且未得到改善，应视为风险处置不力。</p>
+          <p>建议本周约谈企业实控人和财务负责人，要求提交切实可行的归集整改方案并设定明确达标时限。如后续仍无实质改善，按合同约定启动压缩授信或提前收回贷款的程序。</p>
+        `
+      },
+      {
+        id: "warning",
+        title: "十五、历史预警及贷后检查意见",
+        hasData: true,
+        supportsProvenance: true,
+        contentHtml: `
+          <p>2025年3月，该企业首次触发预警，归集率62%，黄色预警，处置意见为“要求整改”。4月归集率降至55%，同类预警再次发生，等级升级为橙色。</p>
+          <p>整改要求发出后未取得实效，预警信号持续存在，说明企业未就资金归集问题采取实质性行动，或其资金状况本身已不允许改善归集水平。无论哪种情况，均表明风险在累积而非消减。</p>
+          <p>建议将此事项提级至贷后管理委员会，重点汇报以下内容：①资金归集率连续不达标的根本原因；②800万资金回流的核查进展；③上下游涉诉对回款的影响程度；④抵押物价值下降后我行担保覆盖率的最新测算结果。请委员会统一决定是否启动提前到期或压降程序。</p>
+        `
+      }
+    ];
+
+    const state = { currentModuleId:null, currentEditable:null };
+
+    const reportCompanyTitle = document.querySelector("#report-company-title");
+    const reportSections = document.querySelector("#report-sections");
+    const chapterNav = document.querySelector("#chapter-nav");
+    const toggleDynamicOnly = document.querySelector("#toggle-dynamic-only");
+    const sidePanel = document.querySelector("#side-panel");
+    const sidePanelTitle = document.querySelector("#side-panel-title");
+    const sidePanelContent = document.querySelector("#side-panel-content");
+    const sidePanelLauncher = document.querySelector("#side-panel-launcher");
+    const panelBackdrop = document.querySelector("#panel-backdrop");
+    const contextMenu = document.querySelector("#context-menu");
+
+    reportCompanyTitle.textContent = REPORT.companyName;
+
+    function visibleSections(){
+      return toggleDynamicOnly.checked ? sections.filter(item => item.hasData) : sections;
+    }
+
+    function renderNav(){
+      chapterNav.innerHTML = visibleSections().map(item => `
+        <a href="#${item.id}" class="nav-item" data-nav-id="${item.id}">
+          <strong>${escapeHtml(item.title)}${item.hasData ? " ☑️" : ""}</strong>
+          <span>${item.supportsProvenance ? "含溯源信息" : "正文模块"}</span>
+        </a>
+      `).join("");
+    }
+
+    function sectionButtons(item){
+      const buttons = [];
+      if(item.id === "riskInsight"){
+        buttons.push(`<button class="ghost-btn quick-action" data-action="knowledge" data-module-id="${item.id}" type="button">知识单元</button>`);
+      }
+      if(["finance","national","tax","judicial"].includes(item.id)){
+        buttons.push(`<button class="ghost-btn quick-action" data-action="deep-analysis" data-module-id="${item.id}" type="button">深度分析</button>`);
+      }
+      if(item.id === "management"){
+        buttons.push(`<button class="ghost-btn quick-action" data-action="management" data-module-id="${item.id}" type="button">回溯管理要求</button>`);
+      }
+      if(item.supportsProvenance){
+        buttons.push(`<button class="ghost-btn quick-action" data-action="provenance" data-module-id="${item.id}" type="button">查看溯源信息</button>`);
+      }
+      return buttons.join("");
+    }
+
+    function renderSections(){
+      reportSections.innerHTML = visibleSections().map(item => `
+        <article id="${item.id}" class="section-card" data-module-id="${item.id}">
+          <h3>${escapeHtml(item.title)}</h3>
+          <div class="section-body">${item.contentHtml}</div>
+          <div class="section-actions">${sectionButtons(item)}</div>
+        </article>
+      `).join("");
+    }
+
+    function syncSidePanelState(){
+      const isCollapsed = sidePanel.classList.contains("collapsed");
+      const isExpanded = sidePanel.classList.contains("expanded");
+      sidePanelLauncher.classList.toggle("hidden", !isCollapsed);
+      panelBackdrop.classList.toggle("hidden", !(isExpanded && !isCollapsed));
+    }
+
+    function openPanel(title, html, fullscreen=false){
+      sidePanel.classList.remove("collapsed");
+      sidePanel.classList.toggle("expanded", fullscreen);
+      sidePanelTitle.textContent = title;
+      sidePanelContent.innerHTML = html;
+      syncSidePanelState();
+    }
+
+    function collapsePanel(){
+      sidePanel.classList.remove("expanded");
+      sidePanel.classList.add("collapsed");
+      syncSidePanelState();
+    }
+
+    function togglePanelSize(){
+      if(sidePanel.classList.contains("collapsed")) sidePanel.classList.remove("collapsed");
+      sidePanel.classList.toggle("expanded");
+      syncSidePanelState();
+    }
+
+    function provenanceHTML(moduleId){
+      const list = provenanceMap[moduleId] || [];
+      if(!list.length) return '<p class="empty-state">当前模块暂无溯源数据。</p>';
+      return list.map(sourceBlockHTML).join("");
+    }
+
+    function showProvenance(moduleId){
+      const section = sections.find(item => item.id === moduleId);
+      openPanel(`${section ? section.title : "模块"} / 溯源信息`, provenanceHTML(moduleId), true);
+    }
+
+    function showDeepAnalysis(moduleId){
+      if(moduleId === "finance") openPanel("六、财务信息 / 深度分析", financeDeepAnalysisHTML(), true);
+      if(moduleId === "national") openPanel("七、国发信息 / 深度分析", nationalDeepAnalysisHTML(), true);
+      if(moduleId === "tax") openPanel("八、税务信息 / 深度分析", taxDeepAnalysisHTML(), true);
+      if(moduleId === "judicial") openPanel("十、司法信息 / 深度分析", judicialDeepAnalysisHTML(), true);
+    }
+
+    function showManagementPanel(){
+      openPanel("回溯管理要求", `
+        ${accordionHTML("14.1批复管理要求清单", tableHTML(managementListRows), true)}
+        ${accordionHTML("14.2资金监管账户月度归集情况", tableHTML(managementCollectionRows), true)}
+      `, true);
+    }
+
+    function showCustomerBackgroundPanel(){
+      openPanel("客户背景", customerBackgroundHTML(), true);
+    }
+
+    function showKnowledgeUnitPanel(){
+      openPanel("知识单元", knowledgeUnitHTML(), true);
+    }
+
+    function showAllDeepAnalysis(){
+      openPanel("深度分析", `
+        ${accordionHTML("六、财务信息", financeDeepAnalysisHTML(), true)}
+        ${accordionHTML("七、国发信息", nationalDeepAnalysisHTML(), true)}
+        ${accordionHTML("八、税务信息", taxDeepAnalysisHTML(), true)}
+        ${accordionHTML("十、司法信息", judicialDeepAnalysisHTML(), true)}
+      `, true);
+    }
+
+    function findEditableBlock(target){
+      if(!target || !(target instanceof Element)) return null;
+      return target.closest(".section-body p, .section-body li, .section-body td, .section-body th, .section-body h4, .section-body span");
+    }
+
+    function enableEditableBlock(target){
+      if(!target) return;
+      target.setAttribute("contenteditable", "true");
+      target.classList.add("editable-block");
+      target.focus();
+      const range = document.createRange();
+      range.selectNodeContents(target);
+      range.collapse(false);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      const finish = () => {
+        target.removeAttribute("contenteditable");
+        target.classList.remove("editable-block");
+        target.removeEventListener("blur", finish);
+      };
+      target.addEventListener("blur", finish);
+    }
+
+    function insertManualNote(moduleId){
+      const body = document.querySelector(`#${CSS.escape(moduleId)} .section-body`);
+      if(!body) return;
+      body.insertAdjacentHTML("beforeend", `
+        <div class="manual-card">
+          <strong>人工填写</strong>
+          <textarea placeholder="进一步调查，并核查原因"></textarea>
+        </div>
+      `);
+    }
+
+    function downloadWord(filename, title, bodyHtml){
+      const content = `
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            body { font-family: "Microsoft YaHei", sans-serif; color:#10233f; line-height:1.7; }
+            h1 { font-size:22pt; }
+            h2,h3 { margin-top:18pt; }
+            table { width:100%; border-collapse:collapse; table-layout:fixed; margin:10pt 0; }
+            th,td { border:1px solid #cbd5e1; padding:7pt; vertical-align:top; word-break:break-word; font-size:10.5pt; }
+            th { background:#eff6ff; }
+            button, textarea, input { display:none !important; }
+          </style>
+        </head>
+        <body>
+          <h1>${escapeHtml(title)}</h1>
+          ${bodyHtml}
+        </body>
+        </html>
+      `;
+      const blob = new Blob([content], {type:"application/msword;charset=utf-8"});
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = filename;
+      link.click();
+      URL.revokeObjectURL(link.href);
+    }
+
+    function updateActiveNav(){
+      const scrollY = window.scrollY + 120;
+      let activeId = "";
+      document.querySelectorAll(".section-card").forEach(section => {
+        if(section.offsetTop <= scrollY) activeId = section.id;
+      });
+      document.querySelectorAll(".nav-item").forEach(item => {
+        item.classList.toggle("active", item.dataset.navId === activeId);
+      });
+    }
+
+    renderNav();
+    renderSections();
+    syncSidePanelState();
+    updateActiveNav();
+
+    toggleDynamicOnly.addEventListener("change", () => {
+      renderNav();
+      renderSections();
+      updateActiveNav();
+    });
+
+    reportSections.addEventListener("click", event => {
+      const button = event.target.closest(".quick-action");
+      if(!button) return;
+      const action = button.dataset.action;
+      const moduleId = button.dataset.moduleId;
+      if(action === "provenance") showProvenance(moduleId);
+      if(action === "deep-analysis") showDeepAnalysis(moduleId);
+      if(action === "management") showManagementPanel();
+      if(action === "knowledge") showKnowledgeUnitPanel();
+    });
+
+    reportSections.addEventListener("contextmenu", event => {
+      const section = event.target.closest(".section-card");
+      if(!section) return;
+      state.currentModuleId = section.dataset.moduleId;
+      state.currentEditable = findEditableBlock(event.target);
+      event.preventDefault();
+      contextMenu.classList.remove("hidden");
+      contextMenu.style.left = `${event.clientX}px`;
+      contextMenu.style.top = `${event.clientY}px`;
+    });
+
+    contextMenu.addEventListener("click", event => {
+      const button = event.target.closest("button");
+      if(!button || !state.currentModuleId) return;
+      const action = button.dataset.action;
+      if(action === "provenance") showProvenance(state.currentModuleId);
+      if(action === "insert-manual-note") insertManualNote(state.currentModuleId);
+      if(action === "edit-current-block") enableEditableBlock(state.currentEditable);
+      contextMenu.classList.add("hidden");
+    });
+
+    document.addEventListener("click", event => {
+      if(!event.target.closest("#context-menu")) contextMenu.classList.add("hidden");
+    });
+
+    document.querySelector("#toggle-panel-collapse").addEventListener("click", collapsePanel);
+    document.querySelector("#toggle-panel-size").addEventListener("click", togglePanelSize);
+
+    sidePanelLauncher.addEventListener("click", () => {
+      sidePanel.classList.remove("collapsed");
+      syncSidePanelState();
+    });
+
+    panelBackdrop.addEventListener("click", () => {
+      sidePanel.classList.remove("expanded");
+      syncSidePanelState();
+    });
+
+    document.querySelector("#back-to-top").addEventListener("click", () => {
+      window.scrollTo({top:0, behavior:"smooth"});
+    });
+
+    document.querySelector("#download-word").addEventListener("click", showAllDeepAnalysis);
+    document.querySelector("#show-management-panel").addEventListener("click", showManagementPanel);
+    document.querySelector("#show-customer-background-panel").addEventListener("click", showCustomerBackgroundPanel);
+
+    document.querySelector("#download-report-word").addEventListener("click", () => {
+      const bodyHtml = Array.from(document.querySelectorAll(".section-card"))
+        .map(section => section.innerHTML)
+        .join("<hr />");
+      downloadWord(`${REPORT.companyName}-贷后管理报告.doc`, `${REPORT.companyName} 贷后管理报告`, bodyHtml);
+    });
+
+    window.addEventListener("scroll", updateActiveNav, {passive:true});
+  </script>
+</body>
+</html>

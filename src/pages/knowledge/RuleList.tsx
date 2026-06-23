@@ -1,36 +1,55 @@
 /**
- * 知识库管理页 — 规则列表 + 场景管理 + 规则详情（条件+标签）
+ * 知识库管理页 — 规则列表 + 场景管理 + 条件/标签完整 CRUD
  */
 import { useEffect, useState } from 'react';
-import { Table, Button, Modal, Form, Input, Select, Space, message, Tag } from 'antd';
+import { Table, Button, Modal, Form, Input, Select, Space, message, Tag, Popconfirm } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import { knowledgeApi } from '../../api/knowledge';
 
+const TAG_TYPES = [
+  { label: '场景', value: 'SCENARIO' },
+  { label: '行业', value: 'INDUSTRY' },
+  { label: '产品', value: 'PRODUCT' },
+  { label: '风险类型', value: 'RISK_TYPE' },
+];
+
+const OPERATORS = [
+  { label: '大于 >', value: '>' },
+  { label: '大于等于 ≥', value: '>=' },
+  { label: '小于 <', value: '<' },
+  { label: '小于等于 ≤', value: '<=' },
+  { label: '等于 =', value: '=' },
+  { label: '不等于 ≠', value: '!=' },
+  { label: '包含', value: 'CONTAINS' },
+];
+
 export default function RuleList() {
   const [rules, setRules] = useState<any[]>([]);
-  const [, setScenarios] = useState<any[]>([]);     // 场景列表（仅加载，供日后使用）
+  const [, setScenarios] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [mOpen, setMOpen] = useState(false);        // 规则 Modal
   const [sOpen, setSOpen] = useState(false);        // 场景 Modal
-  const [editing, setEditing] = useState<any>(null); // 当前编辑的规则（null=新增）
-  const [conds, setConds] = useState<any[]>([]);    // 当前规则的条件
-  const [tags, setTags] = useState<any[]>([]);      // 当前规则的标签
-  const [did, setDid] = useState<number | null>(null); // 展开详情的规则 ID
-  const [f] = Form.useForm();   // 规则表单
-  const [sf] = Form.useForm();  // 场景表单
+  const [editing, setEditing] = useState<any>(null); // 当前编辑的规则
+  const [conds, setConds] = useState<any[]>([]);
+  const [tags, setTags] = useState<any[]>([]);
+  const [did, setDid] = useState<number | null>(null);
+  const [f] = Form.useForm();
+  const [sf] = Form.useForm();
+  const [cf] = Form.useForm();   // 条件表单
+  const [tf] = Form.useForm();   // 标签表单
+  const [cOpen, setCOpen] = useState(false);  // 条件 Modal
+  const [tOpen, setTOpen] = useState(false);  // 标签 Modal
 
-  /** 加载规则列表 */
+  /** 加载数据 */
   const fetch = async () => {
     setLoading(true);
     try { const r = await knowledgeApi.pageRule(1, 200); setRules(r.data.records || []); }
     finally { setLoading(false); }
   };
-  /** 加载全部场景（用于展示和下拉） */
   const fetchS = async () => {
     const r = await knowledgeApi.listScenarios();
     setScenarios(r.data || []);
   };
-  /** 展开规则详情：条件 + 标签 */
   const loadD = async (id: number) => {
     setDid(id);
     const [c, t] = await Promise.all([knowledgeApi.listConditions(id), knowledgeApi.listTags(id)]);
@@ -39,11 +58,41 @@ export default function RuleList() {
   };
   useEffect(() => { fetch(); fetchS(); }, []);
 
-  /** 保存规则（新增或更新） */
+  /** 保存规则 */
   const handleSave = async (v: any) => {
     editing?.id ? await knowledgeApi.updateRule({ ...editing, ...v }) : await knowledgeApi.saveRule(v);
-    message.success('保存成功');
-    setMOpen(false); setEditing(null); f.resetFields(); fetch();
+    message.success('保存成功'); setMOpen(false); setEditing(null); f.resetFields(); fetch();
+  };
+
+  /** 删除规则 */
+  const handleDelete = async (id: number) => {
+    await knowledgeApi.deleteRule(id); message.success('已删除'); fetch();
+  };
+
+  /** 保存条件 */
+  const handleSaveCondition = async (v: any) => {
+    await knowledgeApi.saveConditions(did!, [v]);
+    message.success('条件已添加'); setCOpen(false); cf.resetFields(); loadD(did!);
+  };
+
+  /** 删除条件 */
+  const handleDeleteCondition = async (cid: number) => {
+    const remaining = conds.filter(c => c.id !== cid);
+    await knowledgeApi.saveConditions(did!, remaining);
+    message.success('条件已删除'); loadD(did!);
+  };
+
+  /** 保存标签 */
+  const handleSaveTag = async (v: any) => {
+    await knowledgeApi.saveTags(did!, [v]);
+    message.success('标签已添加'); setTOpen(false); tf.resetFields(); loadD(did!);
+  };
+
+  /** 删除标签 */
+  const handleDeleteTag = async (tid: number) => {
+    const remaining = tags.filter(t => t.id !== tid);
+    await knowledgeApi.saveTags(did!, remaining);
+    message.success('标签已删除'); loadD(did!);
   };
 
   /** 规则表格列 */
@@ -61,7 +110,9 @@ export default function RuleList() {
         <Space>
           <Button type="link" icon={<EditOutlined />} onClick={() => { setEditing(r); f.setFieldsValue(r); setMOpen(true); }}>编辑</Button>
           <Button type="link" onClick={() => loadD(r.id)}>详情</Button>
-          <Button type="link" danger icon={<DeleteOutlined />} onClick={async () => { await knowledgeApi.deleteRule(r.id); fetch(); }}>删除</Button>
+          <Popconfirm title="确认删除此规则？" onConfirm={() => handleDelete(r.id)}>
+            <Button type="link" danger icon={<DeleteOutlined />}>删除</Button>
+          </Popconfirm>
         </Space>
       ),
     },
@@ -78,31 +129,59 @@ export default function RuleList() {
       </div>
       <Table columns={cols} dataSource={rules} rowKey="id" loading={loading} />
 
-      {/* 规则详情展开区：点击"详情"后显示条件和标签 */}
+      {/* 规则详情展开区 */}
       {did && (
         <div style={{ marginTop: 24 }}>
           <h3>规则详情 (ID: {did})</h3>
-          <h4>条件列表</h4>
-          <Table dataSource={conds} rowKey="id" pagination={false} size="small"
+
+          {/* 条件列表 */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
+            <h4 style={{ margin: 0 }}>条件列表</h4>
+            <Button size="small" type="primary" onClick={() => { cf.resetFields(); setCOpen(true); }}>新增条件</Button>
+          </div>
+          <Table dataSource={conds} rowKey="id" pagination={false} size="small" style={{ marginTop: 8 }}
             columns={[
               { title: '指标编码', dataIndex: 'indicatorKey' },
               { title: '运算符', dataIndex: 'operator' },
               { title: '阈值', dataIndex: 'threshold' },
               { title: '顺序', dataIndex: 'logicOrder' },
-              { title: '连接符', dataIndex: 'logicConnector' },
+              { title: '连接符', dataIndex: 'logicConnector', render: (v: string) => <Tag>{v}</Tag> },
+              {
+                title: '操作',
+                render: (_: any, c: any) => (
+                  <Popconfirm title="确认删除此条件？" onConfirm={() => handleDeleteCondition(c.id)}>
+                    <Button type="link" danger size="small">删除</Button>
+                  </Popconfirm>
+                ),
+              },
             ]}
+            locale={{ emptyText: '暂无条件，点击上方"新增条件"添加' }}
           />
-          <h4 style={{ marginTop: 16 }}>标签列表</h4>
-          <Table dataSource={tags} rowKey="id" pagination={false} size="small"
+
+          {/* 标签列表 */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 20 }}>
+            <h4 style={{ margin: 0 }}>标签列表</h4>
+            <Button size="small" type="primary" onClick={() => { tf.resetFields(); setTOpen(true); }}>新增标签</Button>
+          </div>
+          <Table dataSource={tags} rowKey="id" pagination={false} size="small" style={{ marginTop: 8 }}
             columns={[
-              { title: '标签类型', dataIndex: 'tagType' },
+              { title: '标签类型', dataIndex: 'tagType', render: (v: string) => <Tag color="blue">{v}</Tag> },
               { title: '标签值', dataIndex: 'tagValue' },
+              {
+                title: '操作',
+                render: (_: any, t: any) => (
+                  <Popconfirm title="确认删除此标签？" onConfirm={() => handleDeleteTag(t.id)}>
+                    <Button type="link" danger size="small">删除</Button>
+                  </Popconfirm>
+                ),
+              },
             ]}
+            locale={{ emptyText: '暂无标签，点击上方"新增标签"添加' }}
           />
         </div>
       )}
 
-      {/* 新增/编辑规则 Modal */}
+      {/* 规则 Modal */}
       <Modal title={editing ? '编辑规则' : '新增规则'} open={mOpen} width={640}
         onCancel={() => { setMOpen(false); setEditing(null); }} onOk={() => f.submit()}>
         <Form form={f} layout="vertical" onFinish={handleSave}>
@@ -115,11 +194,36 @@ export default function RuleList() {
               { label: '复合规则 (COMPOSITE)', value: 'COMPOSITE' },
             ]} />
           </Form.Item>
-          <Form.Item name="description" label="规则说明（自然语言描述）"><Input.TextArea rows={4} /></Form.Item>
+          <Form.Item name="description" label="规则说明（自然语言描述）" help="Know-Kit 大模型据此理解规则意图">
+            <Input.TextArea rows={4} placeholder="例：企业资产负债率超过70%且营收连续两期下降，判定为高风险" />
+          </Form.Item>
         </Form>
       </Modal>
 
-      {/* 新增场景 Modal */}
+      {/* 新增条件 Modal */}
+      <Modal title="新增条件" open={cOpen} onCancel={() => setCOpen(false)} onOk={() => cf.submit()}>
+        <Form form={cf} layout="vertical" onFinish={handleSaveCondition}>
+          <Form.Item name="indicatorKey" label="指标编码" rules={[{ required: true }]}
+            help="对应 indicator_data.indicator_key"><Input placeholder="如 total_assets" /></Form.Item>
+          <Form.Item name="operator" label="运算符" rules={[{ required: true }]}><Select options={OPERATORS} /></Form.Item>
+          <Form.Item name="threshold" label="阈值" rules={[{ required: true }]}><Input placeholder="如 70" /></Form.Item>
+          <Form.Item name="logicOrder" label="逻辑顺序"><Input type="number" placeholder="1" /></Form.Item>
+          <Form.Item name="logicConnector" label="连接符">
+            <Select options={[{ label: '且 (AND)', value: 'AND' }, { label: '或 (OR)', value: 'OR' }]} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* 新增标签 Modal */}
+      <Modal title="新增标签" open={tOpen} onCancel={() => setTOpen(false)} onOk={() => tf.submit()}>
+        <Form form={tf} layout="vertical" onFinish={handleSaveTag}>
+          <Form.Item name="tagType" label="标签类型" rules={[{ required: true }]}><Select options={TAG_TYPES} /></Form.Item>
+          <Form.Item name="tagValue" label="标签值" rules={[{ required: true }]}
+            help="用于 Know-Kit 规则匹配，如场景名称、行业名称等"><Input placeholder="如 制造业" /></Form.Item>
+        </Form>
+      </Modal>
+
+      {/* 场景 Modal */}
       <Modal title="新增场景" open={sOpen}
         onCancel={() => setSOpen(false)} onOk={() => sf.submit()}>
         <Form form={sf} layout="vertical" onFinish={async (v: any) => {
