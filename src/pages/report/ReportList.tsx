@@ -34,10 +34,17 @@ export default function ReportList() {
       title: "状态",
       dataIndex: "status",
       render: (s: string) => {
-        const m: Record<string, string> = { DRAFT: "default", GENERATED: "processing", PUBLISHED: "success" };
-        return <Tag color={m[s]}>{s}</Tag>;
+        const colorMap: Record<string, string> = { DRAFT: "default", GENERATED: "processing", PUBLISHED: "success" };
+        const labelMap: Record<string, string> = { DRAFT: "草稿", GENERATED: "已生成", PUBLISHED: "已发布" };
+        return <Tag color={colorMap[s]}>{labelMap[s] || s}</Tag>;
       },
     },
+    {
+      title: "生成时间",
+      dataIndex: "createdAt",
+      render: (t: string) => t ? new Date(t).toLocaleString("zh-CN") : "-",
+    },
+    { title: "更新时间", dataIndex: "updatedAt", render: (t: string) => t ? new Date(t).toLocaleString("zh-CN") : "-" },
     {
       title: "操作",
       render: (_: any, r: Report) => (

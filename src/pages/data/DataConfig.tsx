@@ -30,6 +30,23 @@ const DM = [
   'PROPERTY', 'GRAPH', 'MANAGEMENT',
 ];
 
+/** 采集器配置 JSON 示例 */
+const COLLECTOR_JSON_EXAMPLE = `示例（HTTP API 类型）：
+{
+  "url": "https://api.example.com/data",
+  "method": "GET",
+  "headers": {"Authorization": "Bearer xxx"},
+  "params": {"pageSize": 100}
+}`;
+
+/** 解析器配置 JSON 示例 */
+const PARSER_JSON_EXAMPLE = `示例（JSONPath 类型）：
+{
+  "mappings": [
+    {"key": "total_assets", "name": "总资产", "path": "$.data.totalAssets"}
+  ]
+}`;
+
 export default function DataConfig() {
   const [cl, setCl] = useState<any[]>([]);         // 采集器列表
   const [pl, setPl] = useState<any[]>([]);         // 当前选中采集器的解析器列表
@@ -110,8 +127,14 @@ export default function DataConfig() {
         }}>
           <Form.Item name="configName" label="配置名称" rules={[{ required: true }]}><Input /></Form.Item>
           <Form.Item name="collectorType" label="采集类型" rules={[{ required: true }]}><Select options={CT} /></Form.Item>
-          <Form.Item name="configJson" label="配置JSON" rules={[{ required: true }]}><Input.TextArea rows={4} placeholder='{"url":"https://..."}' /></Form.Item>
-          <Form.Item name="cronExpression" label="定时表达式"><Input placeholder="0 0 6 * * ?" /></Form.Item>
+          <Form.Item name="configJson" label="配置JSON" rules={[{ required: true }]}
+            help="根据采集类型填写对应配置（JSON 格式）">
+            <Input.TextArea rows={6} placeholder={COLLECTOR_JSON_EXAMPLE} />
+          </Form.Item>
+          <Form.Item name="cronExpression" label="定时表达式"
+            help="Cron 表达式，控制采集任务的执行频率。留空则仅手动触发。">
+            <Input placeholder="0 0 6 * * ?（每天早6点执行）" />
+          </Form.Item>
         </Form>
       </Modal>
 
@@ -125,8 +148,9 @@ export default function DataConfig() {
           <Form.Item name="domain" label="数据域" rules={[{ required: true }]}>
             <Select options={DM.map(d => ({ label: d, value: d }))} />
           </Form.Item>
-          <Form.Item name="configJson" label="配置JSON" rules={[{ required: true }]}>
-            <Input.TextArea rows={4} placeholder='{"mappings":[...]}' />
+          <Form.Item name="configJson" label="配置JSON" rules={[{ required: true }]}
+            help="根据解析类型填写对应配置（JSON 格式）">
+            <Input.TextArea rows={4} placeholder={PARSER_JSON_EXAMPLE} />
           </Form.Item>
         </Form>
       </Modal>

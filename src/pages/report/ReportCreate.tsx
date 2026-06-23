@@ -5,7 +5,8 @@
  */
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Form, Select, Button, message, Card } from 'antd';
+import { Form, Select, Button, message, Card, Space } from 'antd';
+import { ArrowLeftOutlined } from '@ant-design/icons';
 import { customerApi } from '../../api/customer';
 import { knowKitApi } from '../../api/knowkit';
 import { reportApi } from '../../api/report';
@@ -18,7 +19,6 @@ export default function ReportCreate() {
   const [form] = Form.useForm();
   const navigate = useNavigate();
 
-  /** 加载客户列表和场景标签（用于下拉选择） */
   const loadData = async () => {
     const [cRes, sRes] = await Promise.all([
       customerApi.page(1, 200),
@@ -29,37 +29,44 @@ export default function ReportCreate() {
   };
   useState(() => { loadData(); });
 
-  /** 提交表单 → Know-Kit 分析 → 生成报告 → 跳转查看 */
   const handleSubmit = async (v: any) => {
     setLoading(true);
     try {
       const task = await knowKitApi.submitAnalysis(v.customerId, v.scenarioTags);
       const report = await reportApi.generate(v.customerId, task.data.id!);
-      message.success('Report generated!');
+      message.success('报告生成成功！');
       navigate('/report/' + report.data.id);
     } catch {
-      message.error('Generation failed');
+      message.error('报告生成失败');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <Card title="Generate Report">
-      <Form form={form} layout="vertical" onFinish={handleSubmit} style={{ maxWidth: 600 }}>
-        <Form.Item name="customerId" label="Customer" rules={[{ required: true }]}>
-          <Select showSearch placeholder="Search company..."
-            filterOption={(input, option) => (option?.label as string || '').includes(input)}
-            options={customers.map(c => ({ label: c.companyName, value: c.id }))} />
-        </Form.Item>
-        <Form.Item name="scenarioTags" label="Scenario Tags" rules={[{ required: true }]}>
-          <Select mode="multiple" placeholder="Select tags..."
-            options={scenarios.map(s => ({ label: s.scenarioName, value: s.scenarioName }))} />
-        </Form.Item>
-        <Button type="primary" htmlType="submit" loading={loading}>
-          Submit to Know-Kit &amp; Generate
-        </Button>
-      </Form>
-    </Card>
+    <div>
+      <div style={{ marginBottom: 16 }}>
+        <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/reports')}>返回报告列表</Button>
+      </div>
+      <Card title="生成报告">
+        <Form form={form} layout="vertical" onFinish={handleSubmit} style={{ maxWidth: 600 }}>
+          <Form.Item name="customerId" label="选择客户" rules={[{ required: true }]}>
+            <Select showSearch placeholder="搜索公司名称..."
+              filterOption={(input, option) => (option?.label as string || '').includes(input)}
+              options={customers.map(c => ({ label: c.companyName, value: c.id }))} />
+          </Form.Item>
+          <Form.Item name="scenarioTags" label="场景标签" rules={[{ required: true }]}>
+            <Select mode="multiple" placeholder="选择场景标签..."
+              options={scenarios.map(s => ({ label: s.scenarioName, value: s.scenarioName }))} />
+          </Form.Item>
+          <Space>
+            <Button type="primary" htmlType="submit" loading={loading}>
+              提交分析并生成报告
+            </Button>
+            <Button onClick={() => navigate('/reports')}>取消</Button>
+          </Space>
+        </Form>
+      </Card>
+    </div>
   );
 }
