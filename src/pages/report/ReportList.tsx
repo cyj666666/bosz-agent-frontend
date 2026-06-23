@@ -28,6 +28,7 @@ export default function ReportList() {
 
   /** 表格列定义 */
   const columns = [
+    { title: "企业名称", dataIndex: "companyName" },
     { title: "报告标题", dataIndex: "reportTitle" },
     { title: "报告类型", dataIndex: "reportType" },
     {

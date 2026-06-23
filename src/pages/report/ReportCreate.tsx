@@ -1,14 +1,13 @@
 /**
- * 报告生成页 — 选择客户 + 场景标签 → 调用 Know-Kit 分析 → 生成报告
+ * 报告生成页 — 选择客户 + 场景标签 → 一键生成报告
  *
- * 流程：选客户 → 选场景标签 → 提交 KnowKit 任务 → 用任务 ID 生成报告 → 跳转查看
+ * 流程：选客户 → 选场景标签 → POST /api/report/create（后端完成采集+分析+生成） → 跳转查看
  */
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Form, Select, Button, message, Card, Space } from 'antd';
 import { ArrowLeftOutlined } from '@ant-design/icons';
 import { customerApi } from '../../api/customer';
-import { knowKitApi } from '../../api/knowkit';
 import { reportApi } from '../../api/report';
 import { knowledgeApi } from '../../api/knowledge';
 
@@ -32,8 +31,7 @@ export default function ReportCreate() {
   const handleSubmit = async (v: any) => {
     setLoading(true);
     try {
-      const task = await knowKitApi.submitAnalysis(v.customerId, v.scenarioTags);
-      const report = await reportApi.generate(v.customerId, task.data.id!);
+      const report = await reportApi.create(v.customerId, v.scenarioTags);
       message.success('报告生成成功！');
       navigate('/report/' + report.data.id);
     } catch {
@@ -61,7 +59,7 @@ export default function ReportCreate() {
           </Form.Item>
           <Space>
             <Button type="primary" htmlType="submit" loading={loading}>
-              提交分析并生成报告
+              生成报告
             </Button>
             <Button onClick={() => navigate('/reports')}>取消</Button>
           </Space>

@@ -132,6 +132,7 @@ export interface KnowKitTask {
 export interface Report {
   id?: number;
   customerId: number;
+  companyName?: string;      // 企业名称（后端 page 接口填充，非数据库字段）
   reportTitle: string;
   reportType: string;
   status: 'DRAFT' | 'GENERATED' | 'PUBLISHED';

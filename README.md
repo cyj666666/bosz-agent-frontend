@@ -49,7 +49,7 @@
 |------|------|------|
 | `/reports` | ReportList | 报告列表，支持查看/删除 |
 | `/report/:id` | ReportView | 报告详情，三栏式布局 |
-| `/report-create` | ReportCreate | 选择客户+场景，触发Know-Kit生成 |
+| `/report-create` | ReportCreate | 选择客户+场景，一键生成报告（后端完成采集分析生成） |
 | `/customers` | CustomerList | 客户CRUD管理 |
 | `/data-config` | DataConfig | 采集器/解析器配置 |
 | `/rules` | RuleList | 规则+场景管理 |
@@ -57,10 +57,13 @@
 ### 数据流
 
 ```
-用户操作 --> 页面组件 --> API模块(axios) --> 后端Controller --> Service --> MySQL
-                                                      |
-                                                Know-Kit 智能体
-                                                      |
+用户操作 --> 页面组件 --> API模块(axios) --> 后端 POST /api/report/create（一键采集+分析+生成）
+                                                  |
+                                            后端内部串联:
+                                              ① DataCollectService 遍历启用采集器，按客户采集
+                                              ② KnowKitService Mock 分析
+                                              ③ ReportService 生成 H5 HTML
+                                                  |
                                             报告HTML --> ReportView渲染
 ```
 
@@ -149,3 +152,6 @@ npm run preview   # 预览构建结果
 - [x] 报告导出 Word（MSO 兼容 HTML，直接下载 .doc）
 - [x] 报告导出 HTML（一键下载 .html）
 - [ ] 报告导出 PDF（后续按需实现）
+- [ ] 采集器配置支持 `${customerId}` 占位符，实现按客户动态过滤
+- [ ] SFTP 文件采集和文件上传采集从采集器中剥离，改为独立功能模块（当前混在采集器里，但这两者是客户经理人工操作，与自动采集器的定位不符）
+- [ ] 报告列表支持按客户筛选（后端已支持，前端未做筛选器）
