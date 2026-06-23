@@ -1,0 +1,150 @@
+# 贷后管理智能体项目 - 前端
+
+## 项目简介
+
+本项目是贷后管理智能体项目的前端应用，提供报告查看、客户管理、数据源配置、知识库管理等功能的 Web 界面。
+
+系统采用三栏式报告展示布局，支持：
+- 贷后管理报告的生成、查看、导出
+- 客户基本信息的 CRUD 管理
+- 数据采集器和解析器的动态配置
+- 风险判定规则和场景标签的管理
+- 通过 Know-Kit 智能体触发分析和报告生成
+
+## 技术栈
+
+| 技术 | 版本 | 说明 |
+|------|------|------|
+| React | 18.x | UI框架 |
+| TypeScript | 5.x | 类型安全 |
+| Vite | 8.x | 构建工具 |
+| Ant Design | 5.x | UI组件库 |
+| React Router | 6.x | 路由管理 |
+| Zustand | 5.x | 轻量状态管理 |
+| Axios | 1.x | HTTP请求 |
+| Day.js | 1.x | 日期处理 |
+
+## 架构思路
+
+### 页面布局
+
+```
++----------+------------------------------+----------+
+| 侧边导航  |          内容区               |          |
+|          |                              |          |
+| .报告管理 |   根据路由切换页面:             |          |
+| .客户管理 |                              |          |
+| .数据配置 |   ReportList   报告列表        |          |
+| .知识库   |   ReportView   报告查看        |          |
+|          |   ReportCreate 报告生成        |          |
+|          |   CustomerList 客户管理        |          |
+|          |   DataConfig   数据源配置      |          |
+|          |   RuleList     知识库管理      |          |
++----------+------------------------------+----------+
+```
+
+### 路由设计
+
+| 路由 | 页面 | 说明 |
+|------|------|------|
+| `/reports` | ReportList | 报告列表，支持查看/删除 |
+| `/report/:id` | ReportView | 报告详情，三栏式布局 |
+| `/report-create` | ReportCreate | 选择客户+场景，触发Know-Kit生成 |
+| `/customers` | CustomerList | 客户CRUD管理 |
+| `/data-config` | DataConfig | 采集器/解析器配置 |
+| `/rules` | RuleList | 规则+场景管理 |
+
+### 数据流
+
+```
+用户操作 --> 页面组件 --> API模块(axios) --> 后端Controller --> Service --> MySQL
+                                                      |
+                                                Know-Kit 智能体
+                                                      |
+                                            报告HTML --> ReportView渲染
+```
+
+### 状态管理策略
+
+- **全局状态**（当前客户、当前报告）：使用 Zustand store
+- **页面级数据**（列表数据、表单数据）：使用 React useState
+- **服务端数据缓存**：由 API 模块直接返回，组件内管理 loading/error 状态
+
+### 报告查看页设计
+
+报告查看页是核心页面，设计为三栏布局：
+
+- **左栏**：报告目录导航，锚点链接到各章节，支持"只看有动态模块"筛选
+- **中间**：报告正文，15个章节卡片，包含风险洞察、财务分析、司法信息等
+- **右栏**：侧边栏，展示溯源数据、深度分析、知识单元等辅助信息
+
+交互设计参考产品原型 `技术架构/贷后管理报告.html`：
+- 每个章节支持"查看溯源信息"和"深度分析"
+- 右键菜单：查看溯源、人工填写、修改文段
+- 目录滚动高亮
+- 侧边栏折叠/全屏切换
+- 支持下载 Word
+
+## 项目结构
+
+```
+bosz-agent-frontend/
+├── index.html
+├── package.json
+├── vite.config.ts
+└── src/
+    ├── main.tsx                     # 应用入口
+    ├── App.tsx                      # 根组件（ConfigProvider + Router）
+    ├── index.css                    # 全局样式
+    ├── types/
+    │   └── index.ts                 # TypeScript类型定义（所有实体）
+    ├── api/
+    │   ├── request.ts               # Axios实例 + 拦截器
+    │   ├── customer.ts              # 客户API
+    │   ├── dataConfig.ts            # 数据源配置API
+    │   ├── knowledge.ts             # 知识库API
+    │   ├── knowkit.ts               # Know-Kit API
+    │   └── report.ts                # 报告API
+    ├── store/
+    │   └── index.ts                 # Zustand全局状态
+    ├── router/
+    │   └── index.tsx                # 路由配置
+    ├── components/
+    │   └── layout/
+    │       └── MainLayout.tsx       # 主布局（侧边栏+顶栏+内容区）
+    └── pages/
+        ├── report/
+        │   ├── ReportList.tsx       # 报告列表页
+        │   ├── ReportView.tsx       # 报告查看页
+        │   └── ReportCreate.tsx     # 报告生成页
+        ├── data/
+        │   ├── CustomerList.tsx     # 客户管理页
+        │   └── DataConfig.tsx       # 数据源配置页
+        └── knowledge/
+            └── RuleList.tsx         # 知识库规则管理页
+```
+
+## 启动方式
+
+```bash
+cd frontend
+npm install
+npm run dev
+
+# 开发服务器: http://localhost:5173
+```
+
+```bash
+# 生产构建
+npm run build     # 输出到 dist/
+npm run preview   # 预览构建结果
+```
+
+## 待完成
+
+- [ ] 报告查看页（ReportView）三栏式完整布局
+- [ ] 报告 HTML 渲染引擎（基于参考原型 `贷后管理报告.html`）
+- [ ] 数据源配置页完善采集器/解析器表单
+- [ ] 知识库规则页条件/标签的完整CRUD
+- [ ] 报告导出功能（Word/PDF）
+- [ ] 移动端响应式适配
