@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Button, Spin, message } from 'antd';
 import { ArrowLeftOutlined } from '@ant-design/icons';
-import DOMPurify from 'dompurify';
 import { reportApi } from '../../api/report';
 import type { Report } from '../../types';
 
@@ -31,7 +30,7 @@ export default function ReportView() {
         <h2>{report.reportTitle}</h2>
       </div>
       {report.contentHtml ? (
-        <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(report.contentHtml) }} />
+        <div dangerouslySetInnerHTML={{ __html: report.contentHtml }} />
       ) : (
         <div style={{ padding: 40, textAlign: 'center', color: '#999' }}>
           报告内容待生成。请先通过 Know-Kit 分析生成内容。
