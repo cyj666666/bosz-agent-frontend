@@ -47,12 +47,15 @@
 
 | 路由 | 页面 | 说明 |
 |------|------|------|
+| `/login` | Login | 登录页（账号密码认证，JWT Token） |
 | `/reports` | ReportList | 报告列表，支持查看/删除 |
 | `/report/:id` | ReportView | 报告详情，三栏式布局 |
-| `/report-create` | ReportCreate | 选择客户+场景，一键生成报告（后端完成采集分析生成） |
+| `/report-create` | ReportCreate | 选择客户+场景，一键生成报告 |
 | `/customers` | CustomerList | 客户CRUD管理 |
 | `/data-config` | DataConfig | 采集器/解析器配置 |
 | `/rules` | RuleList | 规则+场景管理 |
+| `/users` | UserList | 用户管理（仅管理员） |
+| `/roles` | RoleList | 角色管理（仅管理员） |
 
 ### 数据流
 
@@ -102,7 +105,8 @@ bosz-agent-frontend/
     ├── types/
     │   └── index.ts                 # TypeScript类型定义（所有实体）
     ├── api/
-    │   ├── request.ts               # Axios实例 + 拦截器
+    │   ├── request.ts               # Axios实例 + Token拦截器 + 401处理
+    │   ├── auth.ts                  # 认证API（登录）
     │   ├── customer.ts              # 客户API
     │   ├── dataConfig.ts            # 数据源配置API
     │   ├── knowledge.ts             # 知识库API
@@ -114,8 +118,10 @@ bosz-agent-frontend/
     │   └── index.tsx                # 路由配置
     ├── components/
     │   └── layout/
-    │       └── MainLayout.tsx       # 主布局（侧边栏+顶栏+内容区）
+    │       ├── MainLayout.tsx       # 主布局（侧边栏+顶栏+用户信息+退出）
+    │       └── AuthGuard.tsx        # 路由守卫（未登录重定向/login）
     └── pages/
+        ├── Login.tsx                # 登录页
         ├── report/
         │   ├── ReportList.tsx       # 报告列表页
         │   ├── ReportView.tsx       # 报告查看页
@@ -125,6 +131,9 @@ bosz-agent-frontend/
         │   └── DataConfig.tsx       # 数据源配置页
         └── knowledge/
             └── RuleList.tsx         # 知识库规则管理页
+        └── system/
+            ├── UserList.tsx         # 用户管理页
+            └── RoleList.tsx         # 角色管理页
 ```
 
 ## 启动方式
@@ -152,6 +161,6 @@ npm run preview   # 预览构建结果
 - [x] 报告导出 Word（MSO 兼容 HTML，直接下载 .doc）
 - [x] 报告导出 HTML（一键下载 .html）
 - [ ] 报告导出 PDF（后续按需实现）
-- [ ] 采集器配置支持 `${customerId}` 占位符，实现按客户动态过滤
 - [ ] SFTP 文件采集和文件上传采集从采集器中剥离，改为独立功能模块（当前混在采集器里，但这两者是客户经理人工操作，与自动采集器的定位不符）
 - [ ] 报告列表支持按客户筛选（后端已支持，前端未做筛选器）
+- [x] 用户登录认证（JWT Token + BCrypt 加密 + 路由守卫 + 角色菜单权限可配置 + 顶栏改密）

@@ -139,3 +139,40 @@ export interface Report {
   knowKitTaskId?: number;    // 关联的 Know-Kit 任务 ID
   contentHtml: string;       // 报告正文 HTML
 }
+
+/** 登录请求 */
+export interface LoginRequest {
+  username: string;
+  password: string;
+}
+
+/** 登录响应 */
+export interface LoginResult {
+  token: string;
+  username: string;
+  realName: string;
+  roles: string[];
+  menus: string[];  // 可访问的菜单路由
+}
+
+/** 角色 */
+export interface Role {
+  id?: number;
+  roleCode: string;
+  roleName: string;
+  description?: string;
+  menuPermissions?: string;  // JSON 数组
+  createdAt?: string;
+}
+
+/** 用户（含角色信息） */
+export interface UserInfo {
+  id?: number;
+  username: string;
+  password?: string;
+  realName: string;
+  status: number;
+  createdAt?: string;
+  roles?: string[];
+  roleIds?: number[];
+}
