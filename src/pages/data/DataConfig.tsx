@@ -1,8 +1,14 @@
+/**
+ * 数据源配置页 — 采集器列表 + 子表解析器管理
+ *
+ * 交互：点击采集器行的"解析器"按钮 → 下方展开该采集器下的解析器列表
+ */
 import { useEffect, useState } from 'react';
 import { Table, Button, Modal, Form, Input, Select, Space, message } from 'antd';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import { dataConfigApi } from '../../api/dataConfig';
 
+/** 采集器类型选项 */
 const CT = [
   { label: 'HTTP API', value: 'HTTP_API' },
   { label: '数据库同步', value: 'DB_SYNC' },
@@ -10,12 +16,14 @@ const CT = [
   { label: '文件上传', value: 'FILE_UPLOAD' },
   { label: 'Webhook', value: 'WEBHOOK' },
 ];
+/** 解析器类型选项 */
 const PT = [
   { label: 'JSONPath 提取', value: 'JSON_PATH' },
   { label: 'Excel 模板', value: 'EXCEL_TEMPLATE' },
   { label: 'OCR 文本', value: 'OCR_TEXT' },
   { label: 'Groovy 脚本', value: 'GROOVY_SCRIPT' },
 ];
+/** 数据域列表 */
 const DM = [
   'FINANCE', 'CREDIT', 'TAX', 'JUDICIAL', 'SETTLEMENT',
   'INDUSTRY_COMMERCE', 'SOCIAL_SECURITY', 'CUSTOMS', 'UTILITY',
@@ -23,18 +31,20 @@ const DM = [
 ];
 
 export default function DataConfig() {
-  const [cl, setCl] = useState<any[]>([]);
-  const [pl, setPl] = useState<any[]>([]);
-  const [cm, setCm] = useState(false);
-  const [pm, setPm] = useState(false);
-  const [sid, setSid] = useState<number | null>(null);
+  const [cl, setCl] = useState<any[]>([]);         // 采集器列表
+  const [pl, setPl] = useState<any[]>([]);         // 当前选中采集器的解析器列表
+  const [cm, setCm] = useState(false);             // 采集器 Modal 开关
+  const [pm, setPm] = useState(false);             // 解析器 Modal 开关
+  const [sid, setSid] = useState<number | null>(null); // 当前选中的采集器 ID
   const [f] = Form.useForm();
   const [pf] = Form.useForm();
 
+  /** 加载采集器列表 */
   const fc = async () => {
     const r = await dataConfigApi.pageCollector(1, 100);
     setCl(r.data.records || []);
   };
+  /** 加载指定采集器的解析器列表 */
   const fp = async (id: number) => {
     setSid(id);
     const r = await dataConfigApi.listParser(id);
@@ -42,13 +52,15 @@ export default function DataConfig() {
   };
   useEffect(() => { fc(); }, []);
 
+  /** 采集器表格列 */
   const cc = [
     { title: '配置名称', dataIndex: 'configName' },
     { title: '采集类型', dataIndex: 'collectorType' },
     { title: '定时表达式', dataIndex: 'cronExpression' },
     { title: '启用', dataIndex: 'enabled', render: (v: number) => v === 1 ? '是' : '否' },
     {
-      title: '操作', render: (_: any, r: any) => (
+      title: '操作',
+      render: (_: any, r: any) => (
         <Space>
           <Button type="link" onClick={() => fp(r.id)}>解析器</Button>
           <Button type="link" danger icon={<DeleteOutlined />} onClick={async () => { await dataConfigApi.deleteCollector(r.id); fc(); }} />
@@ -56,12 +68,14 @@ export default function DataConfig() {
       ),
     },
   ];
+  /** 解析器表格列 */
   const pc = [
     { title: '解析类型', dataIndex: 'parserType' },
     { title: '数据域', dataIndex: 'domain' },
     { title: '执行顺序', dataIndex: 'sortOrder' },
     {
-      title: '操作', render: (_: any, r: any) => (
+      title: '操作',
+      render: (_: any, r: any) => (
         <Button type="link" danger icon={<DeleteOutlined />} onClick={async () => { await dataConfigApi.deleteParser(r.id); sid && fp(sid); }} />
       ),
     },
@@ -76,6 +90,8 @@ export default function DataConfig() {
         </Button>
       </div>
       <Table columns={cc} dataSource={cl} rowKey="id" />
+
+      {/* 选中采集器后展开解析器子表 */}
       {sid && (
         <div style={{ marginTop: 24 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
@@ -86,6 +102,7 @@ export default function DataConfig() {
         </div>
       )}
 
+      {/* 新增采集器 Modal */}
       <Modal title="新增采集器" open={cm} onCancel={() => setCm(false)} onOk={() => f.submit()}>
         <Form form={f} layout="vertical" onFinish={async (v: any) => {
           await dataConfigApi.saveCollector(v);
@@ -98,6 +115,7 @@ export default function DataConfig() {
         </Form>
       </Modal>
 
+      {/* 新增解析器 Modal — sortOrder 自动递增 */}
       <Modal title="新增解析器" open={pm} onCancel={() => setPm(false)} onOk={() => pf.submit()}>
         <Form form={pf} layout="vertical" onFinish={async (v: any) => {
           await dataConfigApi.saveParser({ ...v, collectorId: sid!, sortOrder: pl.length + 1 });

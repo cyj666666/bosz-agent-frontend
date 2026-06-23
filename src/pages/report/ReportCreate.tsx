@@ -1,3 +1,8 @@
+/**
+ * 报告生成页 — 选择客户 + 场景标签 → 调用 Know-Kit 分析 → 生成报告
+ *
+ * 流程：选客户 → 选场景标签 → 提交 KnowKit 任务 → 用任务 ID 生成报告 → 跳转查看
+ */
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Form, Select, Button, message, Card } from 'antd';
@@ -13,6 +18,7 @@ export default function ReportCreate() {
   const [form] = Form.useForm();
   const navigate = useNavigate();
 
+  /** 加载客户列表和场景标签（用于下拉选择） */
   const loadData = async () => {
     const [cRes, sRes] = await Promise.all([
       customerApi.page(1, 200),
@@ -23,6 +29,7 @@ export default function ReportCreate() {
   };
   useState(() => { loadData(); });
 
+  /** 提交表单 → Know-Kit 分析 → 生成报告 → 跳转查看 */
   const handleSubmit = async (v: any) => {
     setLoading(true);
     try {
