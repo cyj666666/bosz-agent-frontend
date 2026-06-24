@@ -8,6 +8,51 @@ import { create } from 'zustand';
 const TOKEN_KEY = 'bosz_token';
 const USER_KEY = 'bosz_user';
 
+/** 解码 JWT payload 并校验是否过期，过期返回 null，不过期返回 payload 对象 */
+function getValidPayload(token: string | null): Record<string, any> | null {
+  if (!token) return null;
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    // JWT payload 是 base64url 编码，先转 base64 再解码
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const json = decodeURIComponent(
+      atob(base64)
+        .split('')
+        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
+    );
+    const payload = JSON.parse(json);
+    // exp 是秒级 Unix 时间戳，对比当前时间
+    if (payload.exp && payload.exp * 1000 < Date.now()) {
+      return null;
+    }
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+/** 清空 localStorage 中的认证数据 */
+function clearLocalAuth() {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(USER_KEY + '_name');
+  localStorage.removeItem(USER_KEY + '_real');
+  localStorage.removeItem(USER_KEY + '_roles');
+  localStorage.removeItem(USER_KEY + '_menus');
+}
+
+/** 从 localStorage 恢复 token，过期则自动清除 */
+function loadToken(): string | null {
+  const token = localStorage.getItem(TOKEN_KEY);
+  if (!token) return null;
+  if (!getValidPayload(token)) {
+    clearLocalAuth();
+    return null;
+  }
+  return token;
+}
+
 interface AuthState {
   token: string | null;
   username: string | null;
@@ -29,8 +74,8 @@ interface AppState extends AuthState {
 
 /** 全局 store：认证 + 当前选中的客户 ID 和报告 ID */
 export const useAppStore = create<AppState>((set, get) => ({
-  // 认证状态（初始从 localStorage 恢复）
-  token: localStorage.getItem(TOKEN_KEY),
+  // 认证状态（初始从 localStorage 恢复，过期 token 自动清除）
+  token: loadToken(),
   username: localStorage.getItem(USER_KEY + '_name'),
   realName: localStorage.getItem(USER_KEY + '_real'),
   roles: JSON.parse(localStorage.getItem(USER_KEY + '_roles') || '[]'),
@@ -46,11 +91,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   clearAuth: () => {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(USER_KEY + '_name');
-    localStorage.removeItem(USER_KEY + '_real');
-    localStorage.removeItem(USER_KEY + '_roles');
-    localStorage.removeItem(USER_KEY + '_menus');
+    clearLocalAuth();
     set({ token: null, username: null, realName: null, roles: [], menus: [] });
   },
 

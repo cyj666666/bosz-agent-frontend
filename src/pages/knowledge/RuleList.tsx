@@ -2,7 +2,7 @@
  * 知识库管理页 — 规则列表 + 场景管理 + 条件/标签完整 CRUD
  */
 import { useEffect, useState } from 'react';
-import { Table, Button, Modal, Form, Input, Select, Space, message, Tag, Popconfirm } from 'antd';
+import { Table, Button, Modal, Drawer, Form, Input, Select, Space, message, Tag, Popconfirm, Descriptions } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import { knowledgeApi } from '../../api/knowledge';
 
@@ -39,6 +39,8 @@ export default function RuleList() {
   const [tf] = Form.useForm();   // 标签表单
   const [cOpen, setCOpen] = useState(false);  // 条件 Modal
   const [tOpen, setTOpen] = useState(false);  // 标签 Modal
+  const [dOpen, setDOpen] = useState(false);   // 详情 Drawer
+  const [detailRule, setDetailRule] = useState<any>(null); // 当前查看的规则
 
   /** 加载数据 */
   const fetch = async () => {
@@ -109,7 +111,7 @@ export default function RuleList() {
       render: (_: any, r: any) => (
         <Space>
           <Button type="link" icon={<EditOutlined />} onClick={() => { setEditing(r); f.setFieldsValue(r); setMOpen(true); }}>编辑</Button>
-          <Button type="link" onClick={() => loadD(r.id)}>详情</Button>
+          <Button type="link" onClick={() => { setDetailRule(r); loadD(r.id); setDOpen(true); }}>详情</Button>
           <Popconfirm title="确认删除此规则？" onConfirm={() => handleDelete(r.id)}>
             <Button type="link" danger icon={<DeleteOutlined />}>删除</Button>
           </Popconfirm>
@@ -129,57 +131,70 @@ export default function RuleList() {
       </div>
       <Table columns={cols} dataSource={rules} rowKey="id" loading={loading} />
 
-      {/* 规则详情展开区 */}
-      {did && (
-        <div style={{ marginTop: 24 }}>
-          <h3>规则详情 (ID: {did})</h3>
+      {/* 规则详情 Drawer */}
+      <Drawer
+        title={detailRule ? `规则详情 — ${detailRule.ruleCode}` : '规则详情'}
+        open={dOpen}
+        onClose={() => { setDOpen(false); setDetailRule(null); }}
+        width={640}
+      >
+        {detailRule && (
+          <Descriptions column={2} size="small" bordered style={{ marginBottom: 24 }}>
+            <Descriptions.Item label="规则编号">{detailRule.ruleCode}</Descriptions.Item>
+            <Descriptions.Item label="规则名称">{detailRule.ruleName}</Descriptions.Item>
+            <Descriptions.Item label="规则类型"><Tag>{detailRule.ruleType}</Tag></Descriptions.Item>
+            <Descriptions.Item label="状态">
+              {detailRule.enabled === 1 ? <Tag color="green">启用</Tag> : <Tag color="red">禁用</Tag>}
+            </Descriptions.Item>
+            <Descriptions.Item label="规则说明" span={2}>{detailRule.description || '-'}</Descriptions.Item>
+          </Descriptions>
+        )}
 
-          {/* 条件列表 */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
-            <h4 style={{ margin: 0 }}>条件列表</h4>
-            <Button size="small" type="primary" onClick={() => { cf.resetFields(); setCOpen(true); }}>新增条件</Button>
-          </div>
-          <Table dataSource={conds} rowKey="id" pagination={false} size="small" style={{ marginTop: 8 }}
-            columns={[
-              { title: '指标编码', dataIndex: 'indicatorKey' },
-              { title: '运算符', dataIndex: 'operator' },
-              { title: '阈值', dataIndex: 'threshold' },
-              { title: '顺序', dataIndex: 'logicOrder' },
-              { title: '连接符', dataIndex: 'logicConnector', render: (v: string) => <Tag>{v}</Tag> },
-              {
-                title: '操作',
-                render: (_: any, c: any) => (
-                  <Popconfirm title="确认删除此条件？" onConfirm={() => handleDeleteCondition(c.id)}>
-                    <Button type="link" danger size="small">删除</Button>
-                  </Popconfirm>
-                ),
-              },
-            ]}
-            locale={{ emptyText: '暂无条件，点击上方"新增条件"添加' }}
-          />
-
-          {/* 标签列表 */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 20 }}>
-            <h4 style={{ margin: 0 }}>标签列表</h4>
-            <Button size="small" type="primary" onClick={() => { tf.resetFields(); setTOpen(true); }}>新增标签</Button>
-          </div>
-          <Table dataSource={tags} rowKey="id" pagination={false} size="small" style={{ marginTop: 8 }}
-            columns={[
-              { title: '标签类型', dataIndex: 'tagType', render: (v: string) => <Tag color="blue">{v}</Tag> },
-              { title: '标签值', dataIndex: 'tagValue' },
-              {
-                title: '操作',
-                render: (_: any, t: any) => (
-                  <Popconfirm title="确认删除此标签？" onConfirm={() => handleDeleteTag(t.id)}>
-                    <Button type="link" danger size="small">删除</Button>
-                  </Popconfirm>
-                ),
-              },
-            ]}
-            locale={{ emptyText: '暂无标签，点击上方"新增标签"添加' }}
-          />
+        {/* 条件列表 */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <h4 style={{ margin: 0 }}>条件列表</h4>
+          <Button size="small" type="primary" onClick={() => { cf.resetFields(); setCOpen(true); }}>新增条件</Button>
         </div>
-      )}
+        <Table dataSource={conds} rowKey="id" pagination={false} size="small"
+          columns={[
+            { title: '指标编码', dataIndex: 'indicatorKey' },
+            { title: '运算符', dataIndex: 'operator' },
+            { title: '阈值', dataIndex: 'threshold' },
+            { title: '顺序', dataIndex: 'logicOrder' },
+            { title: '连接符', dataIndex: 'logicConnector', render: (v: string) => <Tag>{v}</Tag> },
+            {
+              title: '操作',
+              render: (_: any, c: any) => (
+                <Popconfirm title="确认删除此条件？" onConfirm={() => handleDeleteCondition(c.id)}>
+                  <Button type="link" danger size="small">删除</Button>
+                </Popconfirm>
+              ),
+            },
+          ]}
+          locale={{ emptyText: '暂无条件，点击"新增条件"添加' }}
+        />
+
+        {/* 标签列表 */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 24, marginBottom: 8 }}>
+          <h4 style={{ margin: 0 }}>标签列表</h4>
+          <Button size="small" type="primary" onClick={() => { tf.resetFields(); setTOpen(true); }}>新增标签</Button>
+        </div>
+        <Table dataSource={tags} rowKey="id" pagination={false} size="small"
+          columns={[
+            { title: '标签类型', dataIndex: 'tagType', render: (v: string) => <Tag color="blue">{v}</Tag> },
+            { title: '标签值', dataIndex: 'tagValue' },
+            {
+              title: '操作',
+              render: (_: any, t: any) => (
+                <Popconfirm title="确认删除此标签？" onConfirm={() => handleDeleteTag(t.id)}>
+                  <Button type="link" danger size="small">删除</Button>
+                </Popconfirm>
+              ),
+            },
+          ]}
+          locale={{ emptyText: '暂无标签，点击"新增标签"添加' }}
+        />
+      </Drawer>
 
       {/* 规则 Modal */}
       <Modal title={editing ? '编辑规则' : '新增规则'} open={mOpen} width={640}
