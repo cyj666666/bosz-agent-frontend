@@ -6,8 +6,8 @@ import type { Report, PageResult } from '../types';
 
 export const reportApi = {
   /** 一键生成报告：采集数据 → Know-Kit分析 → 生成HTML */
-  create: (customerId: number, scenarioTags: string[]) =>
-    post<Report>(`/report/create?customerId=${customerId}`, scenarioTags),
+  create: (customerId: number) =>
+    post<Report>(`/report/create?customerId=${customerId}`),
 
   /** 基于已有分析任务生成报告（单独重生成场景） */
   generate: (customerId: number, knowKitTaskId: number) =>

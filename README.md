@@ -50,21 +50,21 @@
 | `/login` | Login | 登录页（账号密码认证，JWT Token） |
 | `/reports` | ReportList | 报告列表，支持查看/删除 |
 | `/report/:id` | ReportView | 报告详情，三栏式布局 |
-| `/report-create` | ReportCreate | 选择客户+场景标签，一键生成报告（行业/产品/风险类型预留） |
+| `/report-create` | ReportCreate | 选择客户，一键生成报告 |
 | `/customers` | CustomerList | 客户CRUD管理 |
 | `/data-config` | DataConfig | 采集器/解析器配置 |
-| `/rules` | RuleList | 知识库管理（规则/场景 Tab + 条件/标签 CRUD） |
+| `/rules` | RuleList | 知识库管理（规则/场景 Tab + 条件/标签 CRUD，标签仅作分类属性） |
 | `/users` | UserList | 用户管理（仅管理员） |
 | `/roles` | RoleList | 角色管理（仅管理员） |
 
 ### 数据流
 
 ```
-用户操作 --> 页面组件 --> API模块(axios) --> 后端 POST /api/report/create（一键采集+分析+生成）
+用户操作 --> 页面组件 --> API模块(axios) --> 后端 POST /api/report/create?customerId=1（一键采集+分析+生成）
                                                   |
                                             后端内部串联:
                                               ① DataCollectService 遍历启用采集器，按客户采集
-                                              ② KnowKitService Mock 分析
+                                              ② KnowKitService 加载所有启用规则 + Mock 分析
                                               ③ ReportService 生成 H5 HTML
                                                   |
                                             报告HTML --> ReportView渲染
@@ -159,7 +159,7 @@ npm run preview   # 预览构建结果
 - [x] 数据源配置页完善采集器/解析器表单（5种采集器+4种解析器动态示例）
 - [x] 知识库管理页：规则/场景 Tab 切换，场景完整 CRUD（增删改查），标签联动场景下拉选择
 - [x] 知识库规则页条件/标签的完整 CRUD（增删改查）
-- [x] 报告生成页：多维标签选择（场景必填，行业/产品/风险类型预留注释）
+- [x] 报告生成页：选择客户一键生成，标签仅作规则分类属性不参与报告筛选
 - [x] 报告导出 Word（MSO 兼容 HTML，直接下载 .doc）
 - [x] 报告导出 HTML（一键下载 .html）
 - [ ] 报告导出 PDF（后续按需实现）
