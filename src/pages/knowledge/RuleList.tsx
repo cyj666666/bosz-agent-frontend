@@ -8,10 +8,9 @@ import { knowledgeApi } from '../../api/knowledge';
 
 const TAG_TYPES = [
   { label: '场景', value: 'SCENARIO' },
-  // TODO: 后续放开行业/产品/风险类型
-  // { label: '行业', value: 'INDUSTRY' },
-  // { label: '产品', value: 'PRODUCT' },
-  // { label: '风险类型', value: 'RISK_TYPE' },
+  { label: '行业', value: 'INDUSTRY' },
+  { label: '产品', value: 'PRODUCT' },
+  { label: '风险类型', value: 'RISK_TYPE' },
 ];
 
 const TAG_TYPE_MAP: Record<string, string> = {
@@ -21,6 +20,7 @@ const TAG_TYPE_MAP: Record<string, string> = {
   RISK_TYPE: '风险类型',
 };
 
+/** 运算符全集（用于表格列映射显示） */
 const OPERATORS = [
   { label: '大于 >', value: '>' },
   { label: '大于等于 ≥', value: '>=' },
@@ -29,7 +29,39 @@ const OPERATORS = [
   { label: '等于 =', value: '=' },
   { label: '不等于 ≠', value: '!=' },
   { label: '包含', value: 'CONTAINS' },
+  { label: '存在', value: 'EXISTS' },
+  { label: '不存在', value: 'NOT_EXISTS' },
 ];
+
+/** 按规则类型限定运算符 */
+const OPS_BY_TYPE: Record<string, { label: string; value: string }[]> = {
+  THRESHOLD: [
+    { label: '大于 >', value: '>' },
+    { label: '大于等于 ≥', value: '>=' },
+    { label: '小于 <', value: '<' },
+    { label: '小于等于 ≤', value: '<=' },
+    { label: '等于 =', value: '=' },
+    { label: '不等于 ≠', value: '!=' },
+    { label: '包含', value: 'CONTAINS' },
+  ],
+  BOOLEAN: [
+    { label: '等于 TRUE', value: '=' },
+    { label: '不等于 TRUE', value: '!=' },
+    { label: '存在', value: 'EXISTS' },
+    { label: '不存在', value: 'NOT_EXISTS' },
+  ],
+  COMPOSITE: [
+    { label: '大于 >', value: '>' },
+    { label: '大于等于 ≥', value: '>=' },
+    { label: '小于 <', value: '<' },
+    { label: '小于等于 ≤', value: '<=' },
+    { label: '等于 =', value: '=' },
+    { label: '不等于 ≠', value: '!=' },
+    { label: '包含', value: 'CONTAINS' },
+    { label: '存在', value: 'EXISTS' },
+    { label: '不存在', value: 'NOT_EXISTS' },
+  ],
+};
 
 const RULE_TYPE_MAP: Record<string, string> = {
   THRESHOLD: '阈值判断',
@@ -188,6 +220,7 @@ export default function RuleList() {
             </>
           ),
         },
+        {/* TODO: 场景管理后续重新设计后再放开
         {
           key: 'scenarios',
           label: '场景管理',
@@ -201,6 +234,7 @@ export default function RuleList() {
             </>
           ),
         },
+        */}
       ]} />
 
       {/* 规则详情 Drawer */}
@@ -230,7 +264,10 @@ export default function RuleList() {
         <Table dataSource={conds} rowKey="id" pagination={false} size="small"
           columns={[
             { title: '指标编码', dataIndex: 'indicatorKey' },
-            { title: '运算符', dataIndex: 'operator' },
+            { title: '运算符', dataIndex: 'operator', render: (v: string) => {
+              const opt = OPERATORS.find(o => o.value === v);
+              return opt ? opt.label : v;
+            }},
             { title: '阈值', dataIndex: 'threshold' },
             { title: '顺序', dataIndex: 'logicOrder' },
             { title: '连接符', dataIndex: 'logicConnector', render: (v: string) => <Tag>{LOGIC_MAP[v] || v}</Tag> },
@@ -287,13 +324,30 @@ export default function RuleList() {
         </Form>
       </Modal>
 
-      {/* 新增条件 Modal */}
+      {/* 新增条件 Modal（运算符按规则类型限定） */}
       <Modal title="新增条件" open={cOpen} onCancel={() => setCOpen(false)} onOk={() => cf.submit()}>
         <Form form={cf} layout="vertical" onFinish={handleSaveCondition}>
           <Form.Item name="indicatorKey" label="指标编码" rules={[{ required: true }]}
             help="对应 indicator_data.indicator_key"><Input placeholder="如 total_assets" /></Form.Item>
-          <Form.Item name="operator" label="运算符" rules={[{ required: true }]}><Select options={OPERATORS} /></Form.Item>
-          <Form.Item name="threshold" label="阈值" rules={[{ required: true }]}><Input placeholder="如 70" /></Form.Item>
+          <Form.Item name="operator" label="运算符" rules={[{ required: true }]}>
+            <Select options={OPS_BY_TYPE[detailRule?.ruleType] || OPERATORS} />
+          </Form.Item>
+          <Form.Item noStyle shouldUpdate={(prev, cur) => prev.operator !== cur.operator}>
+            {({ getFieldValue }) => {
+              const op = getFieldValue('operator');
+              const noThreshold = op === 'EXISTS' || op === 'NOT_EXISTS';
+              const isBoolean = detailRule?.ruleType === 'BOOLEAN';
+              const help = noThreshold
+                ? 'EXISTS / NOT_EXISTS 无需填写阈值'
+                : isBoolean ? '建议填 TRUE / FALSE' : '如 70';
+              return (
+                <Form.Item name="threshold" label="阈值" rules={[{ required: !noThreshold }]}
+                  help={help}>
+                  <Input disabled={noThreshold} placeholder={isBoolean && !noThreshold ? 'TRUE' : '如 70'} />
+                </Form.Item>
+              );
+            }}
+          </Form.Item>
           <Form.Item name="logicOrder" label="逻辑顺序"><Input type="number" placeholder="1" /></Form.Item>
           <Form.Item name="logicConnector" label="连接符">
             <Select options={[{ label: '且 (AND)', value: 'AND' }, { label: '或 (OR)', value: 'OR' }]} />
