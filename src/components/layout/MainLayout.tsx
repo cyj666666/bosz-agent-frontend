@@ -84,7 +84,7 @@ export default function MainLayout() {
           color: '#fff', fontSize: collapsed ? 14 : 18, fontWeight: 700,
           borderBottom: '1px solid rgba(255,255,255,0.1)',
         }}>
-          {collapsed ? '苏银' : '苏州银行报告系统'}
+          {collapsed ? '苏银' : '贷后管理智能体系统'}
         </div>
         <Menu
           theme="dark"
@@ -101,7 +101,7 @@ export default function MainLayout() {
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
           borderBottom: '1px solid #f0f0f0',
         }}>
-          <span style={{ fontSize: 16, fontWeight: 600 }}>苏州银行 · 大模型智能报告平台</span>
+          <span style={{ fontSize: 16, fontWeight: 600 }}>苏州银行 · 贷后管理智能体系统</span>
           <Space>
             <UserOutlined />
             <span>{realName || '管理员'}</span>

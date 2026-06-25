@@ -2,16 +2,24 @@
  * 知识库管理页 — 规则列表 + 场景管理 + 条件/标签完整 CRUD
  */
 import { useEffect, useState } from 'react';
-import { Table, Button, Modal, Drawer, Form, Input, Select, Space, message, Tag, Popconfirm, Descriptions } from 'antd';
+import { Table, Button, Modal, Drawer, Form, Input, Select, Space, message, Tag, Popconfirm, Descriptions, Tabs } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import { knowledgeApi } from '../../api/knowledge';
 
 const TAG_TYPES = [
   { label: '场景', value: 'SCENARIO' },
-  { label: '行业', value: 'INDUSTRY' },
-  { label: '产品', value: 'PRODUCT' },
-  { label: '风险类型', value: 'RISK_TYPE' },
+  // TODO: 后续放开行业/产品/风险类型
+  // { label: '行业', value: 'INDUSTRY' },
+  // { label: '产品', value: 'PRODUCT' },
+  // { label: '风险类型', value: 'RISK_TYPE' },
 ];
+
+const TAG_TYPE_MAP: Record<string, string> = {
+  SCENARIO: '场景',
+  INDUSTRY: '行业',
+  PRODUCT: '产品',
+  RISK_TYPE: '风险类型',
+};
 
 const OPERATORS = [
   { label: '大于 >', value: '>' },
@@ -23,12 +31,24 @@ const OPERATORS = [
   { label: '包含', value: 'CONTAINS' },
 ];
 
+const RULE_TYPE_MAP: Record<string, string> = {
+  THRESHOLD: '阈值判断',
+  BOOLEAN: '布尔判断',
+  COMPOSITE: '复合规则',
+};
+
+const LOGIC_MAP: Record<string, string> = {
+  AND: '且',
+  OR: '或',
+};
+
 export default function RuleList() {
   const [rules, setRules] = useState<any[]>([]);
-  const [, setScenarios] = useState<any[]>([]);
+  const [scenarios, setScenarios] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [mOpen, setMOpen] = useState(false);        // 规则 Modal
   const [sOpen, setSOpen] = useState(false);        // 场景 Modal
+  const [sEditing, setSEditing] = useState<any>(null); // 当前编辑的场景
   const [editing, setEditing] = useState<any>(null); // 当前编辑的规则
   const [conds, setConds] = useState<any[]>([]);
   const [tags, setTags] = useState<any[]>([]);
@@ -84,9 +104,10 @@ export default function RuleList() {
     message.success('条件已删除'); loadD(did!);
   };
 
-  /** 保存标签 */
+  /** 保存标签（合并已有标签+新标签一起提交，后端先删后插） */
   const handleSaveTag = async (v: any) => {
-    await knowledgeApi.saveTags(did!, [v]);
+    const merged = [...tags, v];
+    await knowledgeApi.saveTags(did!, merged);
     message.success('标签已添加'); setTOpen(false); tf.resetFields(); loadD(did!);
   };
 
@@ -97,11 +118,41 @@ export default function RuleList() {
     message.success('标签已删除'); loadD(did!);
   };
 
+  /** 场景保存（新增/编辑） */
+  const handleSaveScenario = async (v: any) => {
+    sEditing?.id ? await knowledgeApi.updateScenario({ ...sEditing, ...v }) : await knowledgeApi.saveScenario(v);
+    message.success('保存成功'); setSOpen(false); setSEditing(null); sf.resetFields(); fetchS();
+  };
+
+  /** 场景删除 */
+  const handleDeleteScenario = async (id: number) => {
+    await knowledgeApi.deleteScenario(id); message.success('已删除'); fetchS();
+  };
+
+  /** 规则表格列 */
+  const sCols = [
+    { title: '场景编码', dataIndex: 'scenarioCode' },
+    { title: '场景名称', dataIndex: 'scenarioName' },
+    { title: '描述', dataIndex: 'description', ellipsis: true, render: (v: string) => v || '-' },
+    {
+      title: '操作',
+      render: (_: any, s: any) => (
+        <Space>
+          <Button type="link" icon={<EditOutlined />}
+            onClick={() => { setSEditing(s); sf.setFieldsValue(s); setSOpen(true); }}>编辑</Button>
+          <Popconfirm title="确认删除此场景？" onConfirm={() => handleDeleteScenario(s.id)}>
+            <Button type="link" danger icon={<DeleteOutlined />}>删除</Button>
+          </Popconfirm>
+        </Space>
+      ),
+    },
+  ];
+
   /** 规则表格列 */
   const cols = [
     { title: '规则编号', dataIndex: 'ruleCode' },
     { title: '规则名称', dataIndex: 'ruleName' },
-    { title: '规则类型', dataIndex: 'ruleType', render: (t: string) => <Tag>{t}</Tag> },
+    { title: '规则类型', dataIndex: 'ruleType', render: (t: string) => <Tag>{RULE_TYPE_MAP[t] || t}</Tag> },
     {
       title: '状态', dataIndex: 'enabled',
       render: (v: number) => v === 1 ? <Tag color="green">启用</Tag> : <Tag color="red">禁用</Tag>,
@@ -122,14 +173,35 @@ export default function RuleList() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
-        <h2>知识库规则管理</h2>
-        <Space>
-          <Button onClick={() => { sf.resetFields(); setSOpen(true); }}>新增场景</Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditing(null); f.resetFields(); setMOpen(true); }}>新增规则</Button>
-        </Space>
-      </div>
-      <Table columns={cols} dataSource={rules} rowKey="id" loading={loading} />
+      <h2 style={{ marginBottom: 16 }}>知识库管理</h2>
+      <Tabs items={[
+        {
+          key: 'rules',
+          label: '规则管理',
+          children: (
+            <>
+              <div style={{ marginBottom: 12, textAlign: 'right' }}>
+                <Button type="primary" icon={<PlusOutlined />}
+                  onClick={() => { setEditing(null); f.resetFields(); setMOpen(true); }}>新增规则</Button>
+              </div>
+              <Table columns={cols} dataSource={rules} rowKey="id" loading={loading} />
+            </>
+          ),
+        },
+        {
+          key: 'scenarios',
+          label: '场景管理',
+          children: (
+            <>
+              <div style={{ marginBottom: 12, textAlign: 'right' }}>
+                <Button onClick={() => { setSEditing(null); sf.resetFields(); setSOpen(true); }}>新增场景</Button>
+              </div>
+              <Table columns={sCols} dataSource={scenarios} rowKey="id" size="small"
+                locale={{ emptyText: '暂无场景，点击"新增场景"添加' }} />
+            </>
+          ),
+        },
+      ]} />
 
       {/* 规则详情 Drawer */}
       <Drawer
@@ -142,7 +214,7 @@ export default function RuleList() {
           <Descriptions column={2} size="small" bordered style={{ marginBottom: 24 }}>
             <Descriptions.Item label="规则编号">{detailRule.ruleCode}</Descriptions.Item>
             <Descriptions.Item label="规则名称">{detailRule.ruleName}</Descriptions.Item>
-            <Descriptions.Item label="规则类型"><Tag>{detailRule.ruleType}</Tag></Descriptions.Item>
+            <Descriptions.Item label="规则类型"><Tag>{RULE_TYPE_MAP[detailRule.ruleType] || detailRule.ruleType}</Tag></Descriptions.Item>
             <Descriptions.Item label="状态">
               {detailRule.enabled === 1 ? <Tag color="green">启用</Tag> : <Tag color="red">禁用</Tag>}
             </Descriptions.Item>
@@ -161,7 +233,7 @@ export default function RuleList() {
             { title: '运算符', dataIndex: 'operator' },
             { title: '阈值', dataIndex: 'threshold' },
             { title: '顺序', dataIndex: 'logicOrder' },
-            { title: '连接符', dataIndex: 'logicConnector', render: (v: string) => <Tag>{v}</Tag> },
+            { title: '连接符', dataIndex: 'logicConnector', render: (v: string) => <Tag>{LOGIC_MAP[v] || v}</Tag> },
             {
               title: '操作',
               render: (_: any, c: any) => (
@@ -181,7 +253,7 @@ export default function RuleList() {
         </div>
         <Table dataSource={tags} rowKey="id" pagination={false} size="small"
           columns={[
-            { title: '标签类型', dataIndex: 'tagType', render: (v: string) => <Tag color="blue">{v}</Tag> },
+            { title: '标签类型', dataIndex: 'tagType', render: (v: string) => <Tag color="blue">{TAG_TYPE_MAP[v] || v}</Tag> },
             { title: '标签值', dataIndex: 'tagValue' },
             {
               title: '操作',
@@ -204,9 +276,9 @@ export default function RuleList() {
           <Form.Item name="ruleName" label="规则名称" rules={[{ required: true }]}><Input /></Form.Item>
           <Form.Item name="ruleType" label="规则类型" rules={[{ required: true }]}>
             <Select options={[
-              { label: '阈值判断 (THRESHOLD)', value: 'THRESHOLD' },
-              { label: '布尔判断 (BOOLEAN)', value: 'BOOLEAN' },
-              { label: '复合规则 (COMPOSITE)', value: 'COMPOSITE' },
+              { label: '阈值判断', value: 'THRESHOLD' },
+              { label: '布尔判断', value: 'BOOLEAN' },
+              { label: '复合规则', value: 'COMPOSITE' },
             ]} />
           </Form.Item>
           <Form.Item name="description" label="规则说明（自然语言描述）" help="Know-Kit 大模型据此理解规则意图">
@@ -233,18 +305,30 @@ export default function RuleList() {
       <Modal title="新增标签" open={tOpen} onCancel={() => setTOpen(false)} onOk={() => tf.submit()}>
         <Form form={tf} layout="vertical" onFinish={handleSaveTag}>
           <Form.Item name="tagType" label="标签类型" rules={[{ required: true }]}><Select options={TAG_TYPES} /></Form.Item>
-          <Form.Item name="tagValue" label="标签值" rules={[{ required: true }]}
-            help="用于 Know-Kit 规则匹配，如场景名称、行业名称等"><Input placeholder="如 制造业" /></Form.Item>
+          <Form.Item noStyle shouldUpdate={(prev, cur) => prev.tagType !== cur.tagType}>
+            {({ getFieldValue }) => {
+              const tagType = getFieldValue('tagType');
+              return tagType === 'SCENARIO' ? (
+                <Form.Item name="tagValue" label="标签值（场景）" rules={[{ required: true }]}
+                  help="从已有场景中选择">
+                  <Select placeholder="选择场景..."
+                    options={scenarios.map(s => ({ label: s.scenarioName, value: s.scenarioName }))} />
+                </Form.Item>
+              ) : (
+                <Form.Item name="tagValue" label="标签值" rules={[{ required: true }]}
+                  help="用于 Know-Kit 规则匹配，如行业名称、产品名称等">
+                  <Input placeholder="如 制造业" />
+                </Form.Item>
+              );
+            }}
+          </Form.Item>
         </Form>
       </Modal>
 
-      {/* 场景 Modal */}
-      <Modal title="新增场景" open={sOpen}
-        onCancel={() => setSOpen(false)} onOk={() => sf.submit()}>
-        <Form form={sf} layout="vertical" onFinish={async (v: any) => {
-          await knowledgeApi.saveScenario(v);
-          setSOpen(false); fetchS(); message.success('保存成功');
-        }}>
+      {/* 场景 Modal（新增/编辑） */}
+      <Modal title={sEditing ? '编辑场景' : '新增场景'} open={sOpen}
+        onCancel={() => { setSOpen(false); setSEditing(null); }} onOk={() => sf.submit()}>
+        <Form form={sf} layout="vertical" onFinish={handleSaveScenario}>
           <Form.Item name="scenarioCode" label="场景编码" rules={[{ required: true }]}><Input /></Form.Item>
           <Form.Item name="scenarioName" label="场景名称" rules={[{ required: true }]}><Input /></Form.Item>
           <Form.Item name="description" label="场景描述"><Input.TextArea /></Form.Item>

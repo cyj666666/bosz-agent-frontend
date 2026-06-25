@@ -8,7 +8,7 @@
 - 贷后管理报告的生成、查看、导出
 - 客户基本信息的 CRUD 管理
 - 数据采集器和解析器的动态配置
-- 风险判定规则和场景标签的管理
+- 风险判定规则和场景标签的管理（场景完整 CRUD、规则标签联动场景下拉、Tab 切换；行业/产品/风险类型标签预留）
 - 通过 Know-Kit 智能体触发分析和报告生成
 
 ## 技术栈
@@ -50,10 +50,10 @@
 | `/login` | Login | 登录页（账号密码认证，JWT Token） |
 | `/reports` | ReportList | 报告列表，支持查看/删除 |
 | `/report/:id` | ReportView | 报告详情，三栏式布局 |
-| `/report-create` | ReportCreate | 选择客户+场景，一键生成报告 |
+| `/report-create` | ReportCreate | 选择客户+场景标签，一键生成报告（行业/产品/风险类型预留） |
 | `/customers` | CustomerList | 客户CRUD管理 |
 | `/data-config` | DataConfig | 采集器/解析器配置 |
-| `/rules` | RuleList | 规则+场景管理 |
+| `/rules` | RuleList | 知识库管理（规则/场景 Tab + 条件/标签 CRUD） |
 | `/users` | UserList | 用户管理（仅管理员） |
 | `/roles` | RoleList | 角色管理（仅管理员） |
 
@@ -125,12 +125,12 @@ bosz-agent-frontend/
         ├── report/
         │   ├── ReportList.tsx       # 报告列表页
         │   ├── ReportView.tsx       # 报告查看页
-        │   └── ReportCreate.tsx     # 报告生成页
+        │   └── ReportCreate.tsx     # 报告生成页（客户+场景标签→一键生成）
         ├── data/
         │   ├── CustomerList.tsx     # 客户管理页
         │   └── DataConfig.tsx       # 数据源配置页
         └── knowledge/
-            └── RuleList.tsx         # 知识库规则管理页
+            └── RuleList.tsx         # 知识库管理页（规则+场景Tab、条件/标签CRUD、标签联动场景下拉）
         └── system/
             ├── UserList.tsx         # 用户管理页
             └── RoleList.tsx         # 角色管理页
@@ -157,10 +157,13 @@ npm run preview   # 预览构建结果
 - [x] 报告查看页（ReportView）三栏式完整布局（后端渲染 HTML）
 - [x] 报告 HTML 渲染引擎（基于 `贷后管理报告.html` 原型）
 - [x] 数据源配置页完善采集器/解析器表单（5种采集器+4种解析器动态示例）
+- [x] 知识库管理页：规则/场景 Tab 切换，场景完整 CRUD（增删改查），标签联动场景下拉选择
 - [x] 知识库规则页条件/标签的完整 CRUD（增删改查）
+- [x] 报告生成页：多维标签选择（场景必填，行业/产品/风险类型预留注释）
 - [x] 报告导出 Word（MSO 兼容 HTML，直接下载 .doc）
 - [x] 报告导出 HTML（一键下载 .html）
 - [ ] 报告导出 PDF（后续按需实现）
 - [ ] SFTP 文件采集和文件上传采集从采集器中剥离，改为独立功能模块（当前混在采集器里，但这两者是客户经理人工操作，与自动采集器的定位不符）
 - [ ] 报告列表支持按客户筛选（后端已支持，前端未做筛选器）
 - [x] 用户登录认证（JWT Token + BCrypt 加密 + 路由守卫 + 角色菜单权限可配置 + 顶栏改密）
+- [x] 枚举值全量中文化（规则类型、连接符、采集/解析器类型、标签类型、报告状态、启用状态）

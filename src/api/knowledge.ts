@@ -17,8 +17,14 @@ export const knowledgeApi = {
   /** 新增场景 */
   saveScenario: (data: RuleScenario) => post('/knowledge/scenario', data),
 
+  /** 更新场景 */
+  updateScenario: (data: RuleScenario) => put('/knowledge/scenario', data),
+
   /** 删除场景 */
   deleteScenario: (id: number) => del(`/knowledge/scenario/${id}`),
+
+  /** 获取各类型标签的去重值（供报告生成页下拉选择行业/产品/风险类型） */
+  distinctTagValues: () => get<Record<string, string[]>>('/knowledge/tags/distinct-values'),
 
   // ========== 规则 ==========
 

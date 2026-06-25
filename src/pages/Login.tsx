@@ -32,7 +32,7 @@ export default function Login() {
       minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
       background: 'linear-gradient(180deg, #fdfefe 0%, #f3f8ff 58%, #eef5ff 100%)',
     }}>
-      <Card title="苏州银行 · 大模型智能报告平台" style={{ width: 400, boxShadow: '0 8px 32px rgba(0,0,0,0.08)' }}>
+      <Card title="苏州银行 · 贷后管理智能体系统" style={{ width: 400, boxShadow: '0 8px 32px rgba(0,0,0,0.08)' }}>
         <Form onFinish={handleLogin} size="large" autoComplete="off">
           <Form.Item name="username" rules={[{ required: true, message: '请输入用户名' }]}>
             <Input prefix={<UserOutlined />} placeholder="用户名" autoComplete="off" />

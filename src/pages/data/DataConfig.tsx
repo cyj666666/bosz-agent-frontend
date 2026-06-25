@@ -23,6 +23,13 @@ const PT = [
   { label: 'OCR 文本', value: 'OCR_TEXT' },
   { label: 'Groovy 脚本', value: 'GROOVY_SCRIPT' },
 ];
+/** 采集类型枚举 → 中文映射 */
+const CT_MAP: Record<string, string> = {};
+CT.forEach(c => { CT_MAP[c.value] = c.label; });
+/** 解析类型枚举 → 中文映射 */
+const PT_MAP: Record<string, string> = {};
+PT.forEach(c => { PT_MAP[c.value] = c.label; });
+
 /** 数据域列表 */
 const DM = [
   'FINANCE', 'CREDIT', 'TAX', 'JUDICIAL', 'SETTLEMENT',
@@ -137,7 +144,7 @@ ${PARSER_EXAMPLES[watchedParserType] || '{}'}`
   /** 采集器表格列 */
   const cc = [
     { title: '配置名称', dataIndex: 'configName' },
-    { title: '采集类型', dataIndex: 'collectorType' },
+    { title: '采集类型', dataIndex: 'collectorType', render: (v: string) => CT_MAP[v] || v },
     { title: '定时表达式', dataIndex: 'cronExpression' },
     { title: '启用', dataIndex: 'enabled', render: (v: number) => v === 1 ? '是' : '否' },
     {
@@ -152,7 +159,7 @@ ${PARSER_EXAMPLES[watchedParserType] || '{}'}`
   ];
   /** 解析器表格列 */
   const pc = [
-    { title: '解析类型', dataIndex: 'parserType' },
+    { title: '解析类型', dataIndex: 'parserType', render: (v: string) => PT_MAP[v] || v },
     { title: '数据域', dataIndex: 'domain' },
     { title: '执行顺序', dataIndex: 'sortOrder' },
     {
