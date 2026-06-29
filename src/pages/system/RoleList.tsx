@@ -28,7 +28,7 @@ export default function RoleList() {
     try {
       const data = {
         ...v,
-        menuPermissions: JSON.stringify(v.menuPermissions || []),
+        menuPermissions: JSON.stringify((v.menuPermissions || []).filter((p: string) => validMenuValues.includes(p))),
       };
       if (editing) {
         await roleApi.update({ ...data, id: editing.id });
@@ -44,23 +44,26 @@ export default function RoleList() {
     } catch { message.error('操作失败'); }
   };
 
-  const openEdit = (r: Role) => {
-    setEditing(r);
-    form.setFieldsValue({
-      ...r,
-      menuPermissions: r.menuPermissions ? JSON.parse(r.menuPermissions) : [],
-    });
-    setModalOpen(true);
-  };
-
   const menuOptions = [
     { label: '报告管理', value: '/reports' },
     { label: '客户管理', value: '/customers' },
     { label: '数据源配置', value: '/data-config' },
+    { label: '指标数据', value: '/indicators' },
     { label: '知识库管理', value: '/rules' },
     { label: '用户管理（系统管理）', value: '/users' },
     { label: '角色管理（系统管理）', value: '/roles' },
   ];
+  const validMenuValues = menuOptions.map(o => o.value);
+
+  const openEdit = (r: Role) => {
+    setEditing(r);
+    const raw: string[] = r.menuPermissions ? JSON.parse(r.menuPermissions) : [];
+    form.setFieldsValue({
+      ...r,
+      menuPermissions: raw.filter((v: string) => validMenuValues.includes(v)),
+    });
+    setModalOpen(true);
+  };
 
   const handleDelete = async (id: number) => {
     await roleApi.delete(id);

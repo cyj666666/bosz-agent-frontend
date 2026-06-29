@@ -14,6 +14,7 @@ import {
   TeamOutlined,
   SettingOutlined,
   SafetyCertificateOutlined,
+  FundOutlined,
 } from '@ant-design/icons';
 import { useAppStore } from '../../store';
 import { userApi } from '../../api/user';
@@ -46,6 +47,7 @@ export default function MainLayout() {
     '/reports': { key: '/reports', icon: <FileTextOutlined />, label: '报告管理' },
     '/customers': { key: '/customers', icon: <TeamOutlined />, label: '客户管理' },
     '/data-config': { key: '/data-config', icon: <SettingOutlined />, label: '数据源配置' },
+    '/indicators': { key: '/indicators', icon: <FundOutlined />, label: '指标数据' },
     '/rules': { key: '/rules', icon: <SafetyCertificateOutlined />, label: '知识库管理' },
     '__system__': {
       key: 'system',
@@ -56,17 +58,32 @@ export default function MainLayout() {
   };
 
   const menuItems: any[] = [];
-  for (const m of menus || []) {
-    if (m === '/users' || m === '/roles') {
-      // 系统管理子菜单
-      if (!menuItems.find((i: any) => i.key === 'system')) {
-        menuItems.push(allMenus['__system__']);
+
+  // admin 全权限标记：直接渲染所有菜单
+  if ((menus || []).includes('*')) {
+    for (const key of Object.keys(allMenus)) {
+      if (key === '__system__') {
+        const sys = { ...allMenus['__system__'], children: [
+          { key: '/users', label: '用户管理' },
+          { key: '/roles', label: '角色管理' },
+        ]};
+        menuItems.push(sys);
+      } else {
+        menuItems.push(allMenus[key]);
       }
-      const sysMenu = menuItems.find((i: any) => i.key === 'system');
-      if (m === '/users') sysMenu.children.push({ key: '/users', label: '用户管理' });
-      if (m === '/roles') sysMenu.children.push({ key: '/roles', label: '角色管理' });
-    } else if (allMenus[m]) {
-      menuItems.push(allMenus[m]);
+    }
+  } else {
+    for (const m of menus || []) {
+      if (m === '/users' || m === '/roles') {
+        if (!menuItems.find((i: any) => i.key === 'system')) {
+          menuItems.push(allMenus['__system__']);
+        }
+        const sysMenu = menuItems.find((i: any) => i.key === 'system');
+        if (m === '/users') sysMenu.children.push({ key: '/users', label: '用户管理' });
+        if (m === '/roles') sysMenu.children.push({ key: '/roles', label: '角色管理' });
+      } else if (allMenus[m]) {
+        menuItems.push(allMenus[m]);
+      }
     }
   }
 

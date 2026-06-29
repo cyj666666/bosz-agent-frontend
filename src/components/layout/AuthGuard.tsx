@@ -15,6 +15,10 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
 
   // 根据菜单权限判断：当前路径是否在允许的菜单列表中
   const path = location.pathname;
+
+  // admin 全权限标记，不拦截任何路径
+  if (menus.includes('*')) return <>{children}</>;
+
   const allowed = menus.some(m => path === m || path.startsWith(m + '/'));
   if (path !== '/' && path !== '/reports' && path !== '/login' && !allowed) {
     return <Navigate to="/reports" replace />;

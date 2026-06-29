@@ -20,6 +20,7 @@ import ReportView from '../pages/report/ReportView';
 import ReportCreate from '../pages/report/ReportCreate';
 import CustomerList from '../pages/data/CustomerList';
 import DataConfig from '../pages/data/DataConfig';
+import IndicatorList from '../pages/data/IndicatorList';
 import RuleList from '../pages/knowledge/RuleList';
 import UserList from '../pages/system/UserList';
 import RoleList from '../pages/system/RoleList';
@@ -39,6 +40,7 @@ const router = createBrowserRouter([
       { path: 'report-create', element: <ReportCreate /> },
       { path: 'customers', element: <CustomerList /> },
       { path: 'data-config', element: <DataConfig /> },
+{ path: 'indicators', element: <IndicatorList /> },
       { path: 'rules', element: <RuleList /> },
       { path: 'users', element: <UserList /> },
       { path: 'roles', element: <RoleList /> },
