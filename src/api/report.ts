@@ -25,4 +25,7 @@ export const reportApi = {
 
   /** 删除报告 */
   delete: (id: number) => del(`/report/${id}`),
+
+  /** 获取报告结构化数据（供前端渲染三栏式报告页） */
+  getData: (customerId: number) => get<any>(`/report/data/${customerId}`),
 };
