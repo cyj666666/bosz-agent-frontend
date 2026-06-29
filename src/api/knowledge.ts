@@ -29,8 +29,8 @@ export const knowledgeApi = {
   // ========== 规则 ==========
 
   /** 分页查询规则，支持关键字搜索 */
-  pageRule: (page: number, size: number, keyword?: string) =>
-    get<PageResult<KnowledgeRule>>('/knowledge/rule/page', { page, size, keyword }),
+  pageRule: (page: number, size: number, keyword?: string, ruleType?: string, enabled?: number) =>
+    get<PageResult<KnowledgeRule>>('/knowledge/rule/page', { page, size, keyword, ruleType, enabled }),
 
   /** 按 ID 查单个规则 */
   getRule: (id: number) => get<KnowledgeRule>(`/knowledge/rule/${id}`),

@@ -6,8 +6,8 @@ import type { IndicatorData, PageResult } from '../types';
 
 export const indicatorApi = {
   /** 分页查询指标，支持按客户和数据域筛选 */
-  page: (page: number, size: number, customerId?: number, domain?: string) =>
-    get<PageResult<IndicatorData>>('/indicator/page', { page, size, customerId, domain }),
+  page: (page: number, size: number, customerId?: number, domain?: string, keyword?: string) =>
+    get<PageResult<IndicatorData>>('/indicator/page', { page, size, customerId, domain, keyword }),
 
   /** 按 ID 查单个指标 */
   getById: (id: number) => get<IndicatorData>(`/indicator/${id}`),

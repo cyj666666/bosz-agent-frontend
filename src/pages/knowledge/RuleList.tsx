@@ -20,14 +20,14 @@ const TAG_TYPE_MAP: Record<string, string> = {
   RISK_TYPE: '风险类型',
 };
 
-/** 运算符全集（用于表格列映射显示） */
+/** 运算符全集（用于表格列映射显示，value 与后端枚举一致） */
 const OPERATORS = [
-  { label: '大于 >', value: '>' },
-  { label: '大于等于 ≥', value: '>=' },
-  { label: '小于 <', value: '<' },
-  { label: '小于等于 ≤', value: '<=' },
-  { label: '等于 =', value: '=' },
-  { label: '不等于 ≠', value: '!=' },
+  { label: '大于 >', value: 'GT' },
+  { label: '大于等于 ≥', value: 'GTE' },
+  { label: '小于 <', value: 'LT' },
+  { label: '小于等于 ≤', value: 'LTE' },
+  { label: '等于 =', value: 'EQ' },
+  { label: '不等于 ≠', value: 'NEQ' },
   { label: '包含', value: 'CONTAINS' },
   { label: '存在', value: 'EXISTS' },
   { label: '不存在', value: 'NOT_EXISTS' },
@@ -36,27 +36,27 @@ const OPERATORS = [
 /** 按规则类型限定运算符 */
 const OPS_BY_TYPE: Record<string, { label: string; value: string }[]> = {
   THRESHOLD: [
-    { label: '大于 >', value: '>' },
-    { label: '大于等于 ≥', value: '>=' },
-    { label: '小于 <', value: '<' },
-    { label: '小于等于 ≤', value: '<=' },
-    { label: '等于 =', value: '=' },
-    { label: '不等于 ≠', value: '!=' },
+    { label: '大于 >', value: 'GT' },
+    { label: '大于等于 ≥', value: 'GTE' },
+    { label: '小于 <', value: 'LT' },
+    { label: '小于等于 ≤', value: 'LTE' },
+    { label: '等于 =', value: 'EQ' },
+    { label: '不等于 ≠', value: 'NEQ' },
     { label: '包含', value: 'CONTAINS' },
   ],
   BOOLEAN: [
-    { label: '等于 TRUE', value: '=' },
-    { label: '不等于 TRUE', value: '!=' },
+    { label: '等于 TRUE', value: 'EQ' },
+    { label: '不等于 TRUE', value: 'NEQ' },
     { label: '存在', value: 'EXISTS' },
     { label: '不存在', value: 'NOT_EXISTS' },
   ],
   COMPOSITE: [
-    { label: '大于 >', value: '>' },
-    { label: '大于等于 ≥', value: '>=' },
-    { label: '小于 <', value: '<' },
-    { label: '小于等于 ≤', value: '<=' },
-    { label: '等于 =', value: '=' },
-    { label: '不等于 ≠', value: '!=' },
+    { label: '大于 >', value: 'GT' },
+    { label: '大于等于 ≥', value: 'GTE' },
+    { label: '小于 <', value: 'LT' },
+    { label: '小于等于 ≤', value: 'LTE' },
+    { label: '等于 =', value: 'EQ' },
+    { label: '不等于 ≠', value: 'NEQ' },
     { label: '包含', value: 'CONTAINS' },
     { label: '存在', value: 'EXISTS' },
     { label: '不存在', value: 'NOT_EXISTS' },
@@ -94,10 +94,15 @@ export default function RuleList() {
   const [dOpen, setDOpen] = useState(false);   // 详情 Drawer
   const [detailRule, setDetailRule] = useState<any>(null); // 当前查看的规则
 
+  // 检索栏
+  const [rKeyword, setRKeyword] = useState('');
+  const [rType, setRType] = useState<string | undefined>();
+  const [rEnabled, setREnabled] = useState<number | undefined>();
+
   /** 加载数据 */
   const fetch = async () => {
     setLoading(true);
-    try { const r = await knowledgeApi.pageRule(1, 200); setRules(r.data.records || []); }
+    try { const r = await knowledgeApi.pageRule(1, 200, rKeyword || undefined, rType, rEnabled); setRules(r.data.records || []); }
     finally { setLoading(false); }
   };
   const fetchS = async () => {
@@ -110,7 +115,7 @@ export default function RuleList() {
     setConds(c.data || []);
     setTags(t.data || []);
   };
-  useEffect(() => { fetch(); fetchS(); }, []);
+  useEffect(() => { fetch(); fetchS(); }, [rKeyword, rType, rEnabled]);
 
   /** 保存规则 */
   const handleSave = async (v: any) => {
@@ -212,7 +217,40 @@ export default function RuleList() {
           label: '规则管理',
           children: (
             <>
-              <div style={{ marginBottom: 12, textAlign: 'right' }}>
+              <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Space>
+                  <Input.Search
+                    placeholder="搜索规则编号/名称"
+                    allowClear
+                    style={{ width: 240 }}
+                    value={rKeyword}
+                    onChange={(e) => setRKeyword(e.target.value)}
+                    onSearch={(v) => setRKeyword(v)}
+                  />
+                  <Select
+                    placeholder="规则类型"
+                    allowClear
+                    style={{ width: 140 }}
+                    value={rType}
+                    onChange={(v) => setRType(v)}
+                    options={[
+                      { label: '阈值判断', value: 'THRESHOLD' },
+                      { label: '布尔判断', value: 'BOOLEAN' },
+                      { label: '复合规则', value: 'COMPOSITE' },
+                    ]}
+                  />
+                  <Select
+                    placeholder="状态"
+                    allowClear
+                    style={{ width: 100 }}
+                    value={rEnabled}
+                    onChange={(v) => setREnabled(v)}
+                    options={[
+                      { label: '启用', value: 1 },
+                      { label: '禁用', value: 0 },
+                    ]}
+                  />
+                </Space>
                 <Button type="primary" icon={<PlusOutlined />}
                   onClick={() => { setEditing(null); f.resetFields(); setMOpen(true); }}>新增规则</Button>
               </div>
@@ -264,6 +302,7 @@ export default function RuleList() {
         <Table dataSource={conds} rowKey="id" pagination={false} size="small"
           columns={[
             { title: '指标编码', dataIndex: 'indicatorKey' },
+            { title: '指标名称', dataIndex: 'indicatorName', render: (v: string) => v || '-' },
             { title: '运算符', dataIndex: 'operator', render: (v: string) => {
               const opt = OPERATORS.find(o => o.value === v);
               return opt ? opt.label : v;

@@ -36,6 +36,7 @@ export default function IndicatorList() {
   const [customers, setCustomers] = useState<any[]>([]);
   const [customerId, setCustomerId] = useState<number | undefined>();
   const [domain, setDomain] = useState<string | undefined>();
+  const [keyword, setKeyword] = useState('');
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<IndicatorData | null>(null);
@@ -56,17 +57,18 @@ export default function IndicatorList() {
   const fetch = async (p = 1) => {
     setLoading(true);
     try {
-      const r = await indicatorApi.page(p, pageSize, customerId, domain);
+      const r = await indicatorApi.page(p, pageSize, customerId, domain, keyword || undefined);
       setData(r.data.records || []);
       setTotal(r.data.total || 0);
     } finally { setLoading(false); }
   };
 
   useEffect(() => { loadCustomers(); }, []);
-  useEffect(() => { fetch(1); setPage(1); }, [customerId, domain]);
+  useEffect(() => { fetch(1); setPage(1); }, [customerId, domain, keyword]);
 
   /** 表格列定义 */
   const cols = [
+    { title: '客户名称', dataIndex: 'companyName', width: 160 },
     { title: '指标编码', dataIndex: 'indicatorKey', width: 140 },
     { title: '指标名称', dataIndex: 'indicatorName', width: 140 },
     { title: '当前值', dataIndex: 'currentValue', width: 120 },
@@ -125,6 +127,14 @@ export default function IndicatorList() {
 
       {/* 筛选栏 */}
       <Space style={{ marginBottom: 16 }}>
+        <Input.Search
+          placeholder="搜索指标编码/名称"
+          allowClear
+          style={{ width: 240 }}
+          value={keyword}
+          onChange={(e) => setKeyword(e.target.value)}
+          onSearch={(v) => setKeyword(v)}
+        />
         <Select
           placeholder="选择客户"
           allowClear
@@ -150,7 +160,7 @@ export default function IndicatorList() {
         dataSource={data}
         rowKey="id"
         loading={loading}
-        scroll={{ x: 1100 }}
+        scroll={{ x: 1260 }}
         pagination={{
           current: page,
           pageSize,

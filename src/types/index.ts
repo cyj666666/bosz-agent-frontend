@@ -70,6 +70,7 @@ export interface ParserConfig {
 export interface IndicatorData {
   id?: number;
   customerId: number;
+  companyName?: string;      // 客户名称（后端 JOIN 填充，非数据库字段）
   indicatorKey: string;      // 指标编码
   indicatorName: string;     // 指标名称
   currentValue: string;      // 当前值
@@ -95,6 +96,7 @@ export interface RuleCondition {
   id?: number;
   ruleId?: number;
   indicatorKey: string;
+  indicatorName?: string;    // 指标名称（后端 JOIN 填充）
   operator: 'GT' | 'GTE' | 'LT' | 'LTE' | 'EQ' | 'NEQ' | 'CONTAINS';
   threshold: string;
   logicOrder: number;        // 条件间的逻辑执行顺序
