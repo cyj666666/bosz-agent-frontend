@@ -89,6 +89,7 @@ export interface KnowledgeRule {
   ruleType: 'THRESHOLD' | 'BOOLEAN' | 'COMPOSITE';
   description: string;       // 规则的自然语言说明
   enabled: number;           // 0=禁用 1=启用
+  sortOrder?: number;        // 排序（对应经验库规则序号）
 }
 
 /** 规则条件 — 指标的阈值/布尔判断 */
