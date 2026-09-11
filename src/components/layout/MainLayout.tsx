@@ -126,7 +126,14 @@ export default function MainLayout() {
             <Button type="link" icon={<LogoutOutlined />} onClick={handleLogout}>退出</Button>
           </Space>
         </Header>
-        <Content style={{ margin: 16, padding: 24, background: themeToken.colorBgContainer, borderRadius: 8, overflow: 'auto' }}>
+        <Content style={{
+          margin: 16,
+          padding: 0,
+          background: themeToken.colorBgContainer,
+          borderRadius: 8,
+          height: 'calc(100vh - 96px)',         // Header 64 + margin 16*2 = 96，子路由内部自滚
+          overflow: 'hidden',
+        }}>
           <Outlet />
         </Content>
       </Layout>

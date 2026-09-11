@@ -1,59 +1,122 @@
 /**
- * 报告列表页 — 展示全部报告，支持查看和删除
+ * 报告列表页 —— 模板化报告记录（app_report_info）
+ *
+ * 数据来源：GET /api/report/instance/page
+ * · "查看" → /report/{reportNo}，详情页调用真实接口渲染报告
+ * · "生成" → POST /api/report/instance/generate?reportNo=…，按模板加工该报告的实例数据
+ *   报告记录由上游预生成（111-待开始），此处只做加工触发，不负责发起报告。
  */
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Table, Button, Space, Tag, message } from "antd";
-import { PlusOutlined, EyeOutlined, DeleteOutlined } from "@ant-design/icons";
-import { reportApi } from "../../api/report";
-import type { Report } from "../../types";
+import { Table, Button, Tag, message, Popconfirm, Tooltip } from "antd";
+import { EyeOutlined, ThunderboltOutlined } from "@ant-design/icons";
+import { reportApi, type ReportInstanceSummary } from "../../api/report";
+
+/** 报告状态码 → 展示样式 */
+const STATUS_MAP: Record<string, { color: string; label: string }> = {
+  "111": { color: "default", label: "待开始" },
+  "000": { color: "processing", label: "进行中" },
+  "888": { color: "success", label: "已完成" },
+  "999": { color: "error", label: "失败" },
+};
 
 export default function ReportList() {
-  const [data, setData] = useState<Report[]>([]);
+  const [data, setData] = useState<ReportInstanceSummary[]>([]);
   const [loading, setLoading] = useState(false);
+  const [generating, setGenerating] = useState<string | null>(null);
   const navigate = useNavigate();
 
-  /** 加载报告列表（首屏取前 100 条） */
+  /** 加载报告记录（首屏取前 100 条） */
   const fetchData = async () => {
     setLoading(true);
-    try { const res = await reportApi.page(1, 100); setData(res.data.records || []); }
-    finally { setLoading(false); }
+    try {
+      const res = await reportApi.instancePage(1, 100);
+      setData(res.data.records || []);
+    } catch (e: any) {
+      message.error(e?.message || "报告列表加载失败");
+    } finally {
+      setLoading(false);
+    }
   };
   useEffect(() => { fetchData(); }, []);
 
-  /** 删除报告后刷新列表 */
-  const handleDelete = async (id: number) => {
-    await reportApi.delete(id); message.success("已删除"); fetchData();
+  /** 触发报告加工（111/999 状态的记录可跑） */
+  const handleGenerate = async (reportNo: string) => {
+    setGenerating(reportNo);
+    try {
+      const res = await reportApi.instanceGenerate(reportNo);
+      const d = res.data || {};
+      // 生成服务不抛异常，以 success 标志判断
+      if (d.success === false) {
+        message.error(d.failReason || "报告生成失败");
+      } else {
+        message.success(`生成成功：内容实例 ${d.contentTotal ?? 0} 条，AI 风险 ${d.riskTotal ?? 0} 条`);
+      }
+    } catch (e: any) {
+      message.error(e?.message || "报告生成失败");
+    } finally {
+      setGenerating(null);
+      fetchData();
+    }
   };
 
-  /** 表格列定义 */
   const columns = [
-    { title: "企业名称", dataIndex: "companyName" },
+    { title: "企业名称", dataIndex: "customerName", width: 220 },
+    { title: "报告编号", dataIndex: "reportNo", width: 190 },
     { title: "报告标题", dataIndex: "reportTitle" },
-    { title: "报告类型", dataIndex: "reportType" },
+    { title: "报告日期", dataIndex: "reportDate", width: 120 },
     {
       title: "状态",
-      dataIndex: "status",
-      render: (s: string) => {
-        const colorMap: Record<string, string> = { DRAFT: "default", GENERATED: "processing", PUBLISHED: "success" };
-        const labelMap: Record<string, string> = { DRAFT: "草稿", GENERATED: "已生成", PUBLISHED: "已发布" };
-        return <Tag color={colorMap[s]}>{labelMap[s] || s}</Tag>;
+      dataIndex: "reportStatus",
+      width: 100,
+      render: (s: string, r: ReportInstanceSummary) => {
+        const item = STATUS_MAP[s] ?? { color: "default", label: s || "-" };
+        const tag = <Tag color={item.color}>{item.label}</Tag>;
+        // 失败状态：悬浮展示失败原因
+        if (s === "999" && r.failReason) {
+          return (
+            <Tooltip title={r.failReason} placement="topLeft">
+              {tag}
+            </Tooltip>
+          );
+        }
+        return tag;
       },
     },
     {
       title: "生成时间",
-      dataIndex: "createdAt",
-      render: (t: string) => t ? new Date(t).toLocaleString("zh-CN") : "-",
+      dataIndex: "generateTime",
+      width: 175,
+      render: (t: string) => (t ? new Date(t).toLocaleString("zh-CN") : "-"),
     },
-    { title: "更新时间", dataIndex: "updatedAt", render: (t: string) => t ? new Date(t).toLocaleString("zh-CN") : "-" },
     {
       title: "操作",
-      render: (_: any, r: Report) => (
-        <Space>
-          <Button type="link" icon={<EyeOutlined />} onClick={() => navigate("/report/" + r.id)}>查看</Button>
-          <Button type="link" danger icon={<DeleteOutlined />} onClick={() => r.id && handleDelete(r.id)}>删除</Button>
-        </Space>
-      ),
+      width: 200,
+      render: (_: any, r: ReportInstanceSummary) => {
+        // 只有已完成（888）才可进入详情查看
+        if (r.reportStatus === "888") {
+          return (
+            <Button type="link" icon={<EyeOutlined />} onClick={() => navigate("/report/" + r.reportNo)}>
+              查看
+            </Button>
+          );
+        }
+        if (r.reportStatus === "000") {
+          return <span style={{ color: "#999" }}>进行中…</span>;
+        }
+        return (
+          <Popconfirm
+            title="按模板加工该报告的实例数据？"
+            onConfirm={() => handleGenerate(r.reportNo)}
+            okText="执行"
+            cancelText="取消"
+          >
+            <Button type="link" icon={<ThunderboltOutlined />} loading={generating === r.reportNo}>
+              生成
+            </Button>
+          </Popconfirm>
+        );
+      },
     },
   ];
 
@@ -61,9 +124,15 @@ export default function ReportList() {
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
         <h2>报告列表</h2>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate("/report-create")}>生成报告</Button>
+        <Button onClick={fetchData}>刷新</Button>
       </div>
-      <Table columns={columns} dataSource={data} rowKey="id" loading={loading} />
+      <Table
+        columns={columns}
+        dataSource={data}
+        rowKey="reportNo"
+        loading={loading}
+        scroll={{ x: 1100 }}
+      />
     </div>
   );
 }
