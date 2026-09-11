@@ -2,7 +2,7 @@
  * 报告列表页 —— 模板化报告记录（report 表）
  *
  * 数据来源：GET /api/report/instance/page
- * · "查看" → /report/{reportNo}，详情页调用真实接口渲染报告
+ * · "查看" → /report/{checkTaskNo}，详情页按日检流水号查最新版本（顶部可切换历史版本）
  * · "生成" → POST /api/report/instance/generate?reportNo=…，按模板加工该报告的实例数据
  *   报告记录由上游预生成（111-待开始），此处只做加工触发，不负责发起报告。
  */
@@ -92,10 +92,10 @@ export default function ReportList() {
       title: "操作",
       width: 200,
       render: (_: any, r: ReportInstanceSummary) => {
-        // 只有已完成（888）才可进入详情查看
+        // 只有已完成（888）才可进入详情查看（按日检流水号进入）
         if (r.status === "888") {
           return (
-            <Button type="link" icon={<EyeOutlined />} onClick={() => navigate("/report/" + r.reportNo)}>
+            <Button type="link" icon={<EyeOutlined />} onClick={() => navigate("/report/" + r.checkTaskNo)}>
               查看
             </Button>
           );

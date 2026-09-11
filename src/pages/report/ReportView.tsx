@@ -12,7 +12,7 @@
  */
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Spin } from 'antd';
+import { Spin, Select } from 'antd';
 import { useReportInstanceApi } from '../../hooks/useReportInstanceApi';
 import {
   type AIRiskItem,
@@ -303,8 +303,8 @@ function downloadWord(filename: string, title: string, bodyHtml: string) {
 export default function ReportView() {
   const params = useParams<{ id: string }>();
   const navigate = useNavigate();
-  // 路由参数即报告编号（app_report_info.reportNo）
-  const reportId = params.id;
+  // 路由参数即日检流水号 checkTaskNo（详情按该流水号下最新版本渲染，顶部下拉可切历史版本）
+  const checkTaskNo = params.id;
 
   const {
     loading,
@@ -315,7 +315,10 @@ export default function ReportView() {
     sourceTemplates,
     aiFullAnalysisHtml,
     setAIRiskList,
-  } = useReportInstanceApi(reportId);
+    versions,
+    currentReportNo,
+    selectVersion,
+  } = useReportInstanceApi(checkTaskNo);
 
   /* ---- 状态 ---- */
   const [filterDynamicOnly, setFilterDynamicOnly] = useState(false);
@@ -678,7 +681,7 @@ export default function ReportView() {
           <p style={{ fontSize: 15, fontWeight: 500, marginBottom: 8 }}>报告加载失败</p>
           <p className="muted">{error}</p>
           <p className="muted" style={{ marginTop: 10 }}>
-            请确认后端已启动、报告记录已生成（reportNo={reportId}），且已调用生成接口完成加工。
+            请确认后端已启动、该日检流水号（checkTaskNo={checkTaskNo}）下已有报告记录，且已完成生成加工。
           </p>
         </div>
       </div>
@@ -726,7 +729,21 @@ export default function ReportView() {
         <main className="report-main">
           <header className="report-topbar panel">
             <div>
-              <h1 className="report-company-title">{reportMeta.companyName}</h1>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+                <h1 className="report-company-title">{reportMeta.companyName}</h1>
+                {versions.length > 1 && (
+                  <Select
+                    value={currentReportNo}
+                    onChange={selectVersion}
+                    style={{ minWidth: 240 }}
+                    placeholder="选择版本"
+                    options={versions.map(v => ({
+                      value: v.reportNo,
+                      label: v.version ? `${v.version}（${v.reportNo}）` : v.reportNo,
+                    }))}
+                  />
+                )}
+              </div>
               <p className="report-page-subtitle">{reportMeta.subtitle}</p>
               <div className="sample-badge">{reportMeta.sampleText}</div>
             </div>

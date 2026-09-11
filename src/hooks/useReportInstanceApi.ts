@@ -1,9 +1,10 @@
 /**
  * 报告详情数据 hook —— 对接后端"模板化报告实例"接口
  *
- * 数据来源：GET /api/report/instance/{reportNo}
- *   · reportNo  报告编号（路由参数）
- *   · 返回       报告头内容块 + 目录树（含内容块）+ AI 风险列表
+ * 入参改为「日检流水号 checkTaskNo」：
+ *   · 先调 GET /api/report/instance/versions?checkTaskNo=… 拿该流水号下所有版本
+ *   · 默认选中最新版本（列表第一条），再调 GET /api/report/instance/{reportNo} 拿详情
+ *   · 切换版本时用选中版本的 reportNo 重新加载详情
  *
  * 本 hook 负责把后端的"目录 + 内容块"结构，适配成报告详情页需要的"章节数组"结构：
  *   · 每个目录 → 一个章节（id=catalogCode，title=目录名）
@@ -16,8 +17,8 @@
  *   · RULE 类内容块的内容即风险正文，与 AI 风险列表的 riskDesc 是同一份文案，
  *     故用该文案全量文本作为 keywords，正文段落据此自动挂上 ai-risk-paragraph
  */
-import { useEffect, useState } from 'react';
-import { reportApi, type ReportInstanceBlock, type ReportInstanceCatalog, type ReportInstanceDetail } from '../api/report';
+import { useCallback, useEffect, useState } from 'react';
+import { reportApi, type ReportInstanceBlock, type ReportInstanceCatalog, type ReportInstanceDetail, type ReportVersionItem } from '../api/report';
 import type { AIRiskItem, AIRiskStatus, ReportMeta, SectionItem, SourceTemplateMap } from './useReportApi';
 
 /** 章节（带"是否有溯源按钮"标记，供目录过滤与标识使用） */
@@ -133,7 +134,50 @@ function riskKeyword(riskDesc?: string): string {
   return decodeEntities(stripHtml(html));
 }
 
-export function useReportInstanceApi(reportNo: string | undefined) {
+/** 把详情数据映射成页面所需的 reportMeta / sections / aiRiskList */
+function applyDetail(
+  detail: ReportInstanceDetail,
+  setReportMeta: (m: ReportMeta) => void,
+  setSections: (s: SectionWithSource[]) => void,
+  setAIRiskList: (r: AIRiskItem[]) => void,
+) {
+  // ---- 报告头：主标题块 + 其余文本块（副标题 / 说明） ----
+  const headBlocks = [...(detail.headBlocks ?? [])].sort(bySortNo);
+  const titleBlock = headBlocks.find(b => b.fillType === 'TITLE' && b.titleLevel === 1);
+  const headTexts = headBlocks
+    .filter(b => b !== titleBlock)
+    .map(b => stripHtml(b.content))
+    .filter(Boolean);
+  setReportMeta({
+    companyName: stripHtml(titleBlock?.content) || detail.customerName || '',
+    subtitle: headTexts[0] ?? '',
+    sampleText: headTexts[1] ?? '',
+  });
+
+  // ---- 目录树 → 章节数组 ----
+  const catalogs = flattenCatalogs(detail.catalogs ?? []);
+  setSections(catalogs.map(renderSection));
+  const catalogNameOf = new Map(catalogs.map(c => [c.catalogCode, c.catalogName]));
+
+  // ---- AI 风险列表 ----
+  setAIRiskList((detail.risks ?? []).map((risk, index) => {
+    const keyword = riskKeyword(risk.riskDesc);
+    return {
+      id: index + 1,
+      ruleName: risk.ruleName ?? '',
+      riskDesc: stripHtml(risk.riskDesc),
+      // 后端已移除 AI 解读 / 行动建议字段，列表不再展示这两列
+      aiRead: '',
+      suggestion: '',
+      chapter: catalogNameOf.get(risk.catalogCode ?? '') ?? '',
+      sectionId: risk.catalogCode ?? '',
+      keywords: keyword ? [keyword] : [],
+      status: toRiskStatus(risk.status),
+    };
+  }));
+}
+
+export function useReportInstanceApi(checkTaskNo: string | undefined) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reportMeta, setReportMeta] = useState<ReportMeta>(EMPTY_META);
@@ -142,54 +186,54 @@ export function useReportInstanceApi(reportNo: string | undefined) {
   const [sourceTemplates] = useState<SourceTemplateMap>({});
   const [aiFullAnalysisHtml] = useState('');
 
+  // 版本相关：版本列表 + 当前查看的报告编号
+  const [versions, setVersions] = useState<ReportVersionItem[]>([]);
+  const [currentReportNo, setCurrentReportNo] = useState<string>('');
+
+  // ① 先查版本列表（checkTaskNo 变化时），默认选中最新版本（列表第一条）
   useEffect(() => {
     let cancelled = false;
-    if (!reportNo) {
-      setError('缺少报告编号');
+    if (!checkTaskNo) {
+      setError('缺少日检流水号（checkTaskNo）');
       setLoading(false);
       return;
     }
     setLoading(true);
     setError(null);
-    reportApi.instanceDetail(reportNo)
+    setVersions([]);
+    setCurrentReportNo('');
+    reportApi.instanceVersions(checkTaskNo)
+      .then(res => {
+        if (cancelled) return;
+        const list = res.data ?? [];
+        setVersions(list);
+        if (list.length === 0) {
+          setError('该日检流水号下暂无报告版本');
+          setLoading(false);
+          return;
+        }
+        setCurrentReportNo(list[0].reportNo);
+      })
+      .catch((e: any) => {
+        if (!cancelled) {
+          setError(e?.message || '版本列表加载失败');
+          setLoading(false);
+        }
+      });
+    return () => { cancelled = true; };
+  }, [checkTaskNo]);
+
+  // ② 再查详情（currentReportNo 变化时）
+  useEffect(() => {
+    let cancelled = false;
+    if (!currentReportNo) return;
+    setLoading(true);
+    setError(null);
+    reportApi.instanceDetail(currentReportNo)
       .then(res => {
         if (cancelled) return;
         const detail = (res.data ?? {}) as ReportInstanceDetail;
-
-        // ---- 报告头：主标题块 + 其余文本块（副标题 / 说明） ----
-        const headBlocks = [...(detail.headBlocks ?? [])].sort(bySortNo);
-        const titleBlock = headBlocks.find(b => b.fillType === 'TITLE' && b.titleLevel === 1);
-        const headTexts = headBlocks
-          .filter(b => b !== titleBlock)
-          .map(b => stripHtml(b.content))
-          .filter(Boolean);
-        setReportMeta({
-          companyName: stripHtml(titleBlock?.content) || detail.customerName || '',
-          subtitle: headTexts[0] ?? '',
-          sampleText: headTexts[1] ?? '',
-        });
-
-        // ---- 目录树 → 章节数组 ----
-        const catalogs = flattenCatalogs(detail.catalogs ?? []);
-        setSections(catalogs.map(renderSection));
-        const catalogNameOf = new Map(catalogs.map(c => [c.catalogCode, c.catalogName]));
-
-        // ---- AI 风险列表 ----
-        setAIRiskList((detail.risks ?? []).map((risk, index) => {
-          const keyword = riskKeyword(risk.riskDesc);
-          return {
-            id: index + 1,
-            ruleName: risk.ruleName ?? '',
-            riskDesc: stripHtml(risk.riskDesc),
-            // 后端已移除 AI 解读 / 行动建议字段，列表不再展示这两列
-            aiRead: '',
-            suggestion: '',
-            chapter: catalogNameOf.get(risk.catalogCode ?? '') ?? '',
-            sectionId: risk.catalogCode ?? '',
-            keywords: keyword ? [keyword] : [],
-            status: toRiskStatus(risk.status),
-          };
-        }));
+        applyDetail(detail, setReportMeta, setSections, setAIRiskList);
       })
       .catch((e: any) => {
         if (!cancelled) setError(e?.message || '报告加载失败');
@@ -198,7 +242,14 @@ export function useReportInstanceApi(reportNo: string | undefined) {
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [reportNo]);
+  }, [currentReportNo]);
+
+  /** 切换版本：重新按 reportNo 加载详情 */
+  const selectVersion = useCallback((reportNo: string) => {
+    setCurrentReportNo(reportNo);
+  }, []);
+
+  const currentVersion = versions.find(v => v.reportNo === currentReportNo)?.version;
 
   return {
     loading,
@@ -209,5 +260,9 @@ export function useReportInstanceApi(reportNo: string | undefined) {
     sourceTemplates,
     aiFullAnalysisHtml,
     setAIRiskList,
+    versions,
+    currentReportNo,
+    currentVersion,
+    selectVersion,
   };
 }

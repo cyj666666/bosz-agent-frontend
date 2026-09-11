@@ -19,7 +19,10 @@ export interface ReportInstanceSummary {
   customerName?: string;
   reportTitle?: string;
   reportType?: string;
+  /** 日检流水号（同一流水号下多个版本） */
   checkTaskNo?: string;
+  /** 版本号（V1/V2/V3） */
+  version?: string;
   /** 111-待开始 000-进行中 888-已完成 999-失败 */
   status?: string;
   /** 失败原因（999 时记录技术类/业务类异常详情） */
@@ -80,6 +83,10 @@ export interface ReportInstanceDetail {
   customerId?: string;
   customerName?: string;
   reportTitle?: string;
+  /** 日检流水号 */
+  checkTaskNo?: string;
+  /** 版本号（V1/V2/V3） */
+  version?: string;
   /** 111-待开始 000-进行中 888-已完成 999-失败 */
   status?: string;
   /** 更新时间（即"生成时间"） */
@@ -92,6 +99,18 @@ export interface ReportInstanceDetail {
   riskInvalid?: number;
 }
 
+/** 报告版本项（版本下拉框数据源） */
+export interface ReportVersionItem {
+  /** 报告编号（详情接口入参） */
+  reportNo: string;
+  /** 版本号（V1/V2/V3） */
+  version?: string;
+  /** 报告状态 */
+  status?: string;
+  /** 更新时间 */
+  updatedAt?: string;
+}
+
 export const reportApi = {
   /* ---------------- 模板化报告实例 ---------------- */
 
@@ -102,6 +121,14 @@ export const reportApi = {
   /** 报告详情（报告头 + 目录树含内容块 + AI 风险列表） */
   instanceDetail: (reportNo: string) =>
     get<ReportInstanceDetail>(`/report/instance/${encodeURIComponent(reportNo)}`),
+
+  /** 某日检流水号下的所有版本（版本下拉框） */
+  instanceVersions: (checkTaskNo: string) =>
+    get<ReportVersionItem[]>('/report/instance/versions', { checkTaskNo }),
+
+  /** 某日检流水号下最新版本的报告详情 */
+  instanceLatest: (checkTaskNo: string) =>
+    get<ReportInstanceDetail>('/report/instance/latest', { checkTaskNo }),
 
   /** 按模板加工生成报告实例（含状态流转） */
   instanceGenerate: (reportNo: string) =>
