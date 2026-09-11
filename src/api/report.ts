@@ -1,15 +1,16 @@
 /**
- * 报告 API — 报告生成、查询、删除
- * <p>含两套：既有 report 表接口；模板化报告实例接口（/report/instance/**，对应 app_report_info + 实例表）。</p>
+ * 报告 API — 模板化报告实例（后端 report 主表 + 模板/实例表）
+ * <p>报告记录由上游预生成（report 表，status=111 待开始），
+ * 本模块接口负责：加工生成（instance/generate|process）、列表（instance/page）、详情（instance/{reportNo}）。</p>
  */
-import { get, post, del } from './request';
-import type { Report, PageResult } from '../types';
+import { get, post } from './request';
+import type { PageResult } from '../types';
 
 /* =============================================================================
- * 模板化报告实例（模板驱动生成，后端 app_report_* 表）
+ * 模板化报告实例（模板驱动生成，后端 report + app_report_* 表）
  * ========================================================================== */
 
-/** 报告记录（app_report_info） */
+/** 报告记录（report 表） */
 export interface ReportInstanceSummary {
   id: number;
   /** 报告编号（详情接口入参） */
@@ -17,14 +18,15 @@ export interface ReportInstanceSummary {
   customerId?: string;
   customerName?: string;
   reportTitle?: string;
+  reportType?: string;
   checkTaskNo?: string;
-  reportDate?: string;
   /** 111-待开始 000-进行中 888-已完成 999-失败 */
-  reportStatus?: string;
-  generatorName?: string;
-  generateTime?: string;
+  status?: string;
   /** 失败原因（999 时记录技术类/业务类异常详情） */
   failReason?: string;
+  createdAt?: string;
+  /** 更新时间（状态流转/失败原因写入时刷新，即"生成时间"） */
+  updatedAt?: string;
 }
 
 /** 报告内容块（实例层） */
@@ -78,9 +80,10 @@ export interface ReportInstanceDetail {
   customerId?: string;
   customerName?: string;
   reportTitle?: string;
-  reportDate?: string;
-  reportStatus?: string;
-  generateTime?: string;
+  /** 111-待开始 000-进行中 888-已完成 999-失败 */
+  status?: string;
+  /** 更新时间（即"生成时间"） */
+  updatedAt?: string;
   headBlocks?: ReportInstanceBlock[];
   catalogs?: ReportInstanceCatalog[];
   risks?: ReportInstanceRisk[];
@@ -90,30 +93,6 @@ export interface ReportInstanceDetail {
 }
 
 export const reportApi = {
-  /** 一键生成报告：采集数据 → Know-Kit分析 → 生成HTML */
-  create: (customerId: number) =>
-    post<Report>(`/report/create?customerId=${customerId}`),
-
-  /** 基于已有分析任务生成报告（单独重生成场景） */
-  generate: (customerId: number, knowKitTaskId: number) =>
-    post<Report>(`/report/generate?customerId=${customerId}&knowKitTaskId=${knowKitTaskId}`),
-
-  /** 分页查询报告列表，可选按客户筛选 */
-  page: (page: number, size: number, customerId?: number) =>
-    get<PageResult<Report>>('/report/page', { page, size, customerId }),
-
-  /** 按 ID 查报告元数据 */
-  getById: (id: number) => get<Report>(`/report/${id}`),
-
-  /** 按 ID 查报告 HTML 正文 */
-  getHtml: (id: number) => get<string>(`/report/${id}/html`),
-
-  /** 删除报告 */
-  delete: (id: number) => del(`/report/${id}`),
-
-  /** 获取报告结构化数据（供前端渲染三栏式报告页） */
-  getData: (customerId: number) => get<any>(`/report/data/${customerId}`),
-
   /* ---------------- 模板化报告实例 ---------------- */
 
   /** 报告记录分页查询（模板化报告列表） */

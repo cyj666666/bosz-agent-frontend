@@ -1,5 +1,5 @@
 /**
- * 报告列表页 —— 模板化报告记录（app_report_info）
+ * 报告列表页 —— 模板化报告记录（report 表）
  *
  * 数据来源：GET /api/report/instance/page
  * · "查看" → /report/{reportNo}，详情页调用真实接口渲染报告
@@ -64,10 +64,9 @@ export default function ReportList() {
     { title: "企业名称", dataIndex: "customerName", width: 220 },
     { title: "报告编号", dataIndex: "reportNo", width: 190 },
     { title: "报告标题", dataIndex: "reportTitle" },
-    { title: "报告日期", dataIndex: "reportDate", width: 120 },
     {
       title: "状态",
-      dataIndex: "reportStatus",
+      dataIndex: "status",
       width: 100,
       render: (s: string, r: ReportInstanceSummary) => {
         const item = STATUS_MAP[s] ?? { color: "default", label: s || "-" };
@@ -85,7 +84,7 @@ export default function ReportList() {
     },
     {
       title: "生成时间",
-      dataIndex: "generateTime",
+      dataIndex: "updatedAt",
       width: 175,
       render: (t: string) => (t ? new Date(t).toLocaleString("zh-CN") : "-"),
     },
@@ -94,14 +93,14 @@ export default function ReportList() {
       width: 200,
       render: (_: any, r: ReportInstanceSummary) => {
         // 只有已完成（888）才可进入详情查看
-        if (r.reportStatus === "888") {
+        if (r.status === "888") {
           return (
             <Button type="link" icon={<EyeOutlined />} onClick={() => navigate("/report/" + r.reportNo)}>
               查看
             </Button>
           );
         }
-        if (r.reportStatus === "000") {
+        if (r.status === "000") {
           return <span style={{ color: "#999" }}>进行中…</span>;
         }
         return (

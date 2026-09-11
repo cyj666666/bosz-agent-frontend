@@ -6,7 +6,6 @@
  *   /               → 重定向到 /reports（需认证）
  *   /reports        → 报告列表
  *   /report/:id     → 报告详情
- *   /report-create  → 一键生成报告
  *   /customers      → 客户管理
  *   /data-config    → 数据源配置
  *   /rules          → 知识库管理
@@ -17,7 +16,6 @@ import AuthGuard from '../components/layout/AuthGuard';
 import Login from '../pages/Login';
 import ReportList from '../pages/report/ReportList';
 import ReportView from '../pages/report/ReportView';
-import ReportCreate from '../pages/report/ReportCreate';
 import CustomerList from '../pages/data/CustomerList';
 import DataConfig from '../pages/data/DataConfig';
 import IndicatorList from '../pages/data/IndicatorList';
@@ -37,7 +35,6 @@ const router = createBrowserRouter([
       { index: true, element: <Navigate to="/reports" replace /> },
       { path: 'reports', element: <ReportList /> },
       { path: 'report/:id', element: <ReportView /> },
-      { path: 'report-create', element: <ReportCreate /> },
       { path: 'customers', element: <CustomerList /> },
       { path: 'data-config', element: <DataConfig /> },
 { path: 'indicators', element: <IndicatorList /> },
