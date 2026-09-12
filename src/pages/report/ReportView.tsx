@@ -13,7 +13,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback, memo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Spin, Select, Modal } from 'antd';
-import { CopyOutlined, CheckOutlined } from '@ant-design/icons';
+import { CopyOutlined, CheckOutlined, HistoryOutlined } from '@ant-design/icons';
 import { useReportInstanceApi } from '../../hooks/useReportInstanceApi';
 import { reportApi, type ReportRiskEditLogItem } from '../../api/report';
 import {
@@ -186,21 +186,55 @@ tr:last-child td { border-bottom: 0; }
    竖排后列宽可收到 66px，省下的宽度全部给风险描述 */
 .ai-risk-op-btns { display: flex; flex-direction: column; gap: 5px; }
 .ai-risk-op-btns .ai-risk-mini-btn { width: 100%; margin: 0; }
-/* 「修改记录(N)」按钮：仅当该风险要点有历史修改时出现在「规则名称」下方 */
-.ai-risk-history-btn { display: block; margin-top: 5px; padding: 1px 7px; border-radius: 999px; border: 1px solid rgba(22,100,255,.24); background: rgba(22,100,255,.07); color: var(--accent); font-size: 11px; font-weight: 700; line-height: 1.7; cursor: pointer; white-space: nowrap; transition: background .18s ease, border-color .18s ease; }
-.ai-risk-history-btn:hover { background: rgba(22,100,255,.15); border-color: rgba(22,100,255,.42); }
-/* 修改记录弹窗（内容在 antd portal 里，:root 变量与类选择器同样生效） */
-.report-history-modal .ant-modal-title { font-size: 16px; font-weight: 800; }
-.history-list { margin: 0; padding: 0; list-style: none; max-height: 52vh; overflow: auto; }
-.history-list li { padding: 10px 2px; border-bottom: 1px dashed var(--line); font-size: 13.5px; line-height: 1.85; color: var(--text); word-break: break-word; }
-.history-list li:last-child { border-bottom: 0; }
-.history-seq { font-weight: 800; color: var(--accent); }
-.history-who { font-weight: 700; }
-.history-time { margin-left: 10px; color: var(--muted); font-size: 12.5px; }
-.history-action { margin-left: 6px; color: var(--muted); }
-.history-text { white-space: pre-wrap; }
-.history-status { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 22px 0; color: var(--muted); font-size: 14px; }
-.history-status.is-error { color: #c0392b; }
+/* 「修改记录(N)」按钮：挂在正文规则块末尾（右下角、随正文流），仅当该风险要点有历史修改时出现。
+   注意：它是渲染后注入到 .ai-risk-paragraph 里的真实元素，编辑保存/取消后需重新注入；
+   导出 Word 时统一隐藏（见 downloadWord 的 CSS）。 */
+.rpt-history-btn { display: block; margin: 10px 0 0 auto; padding: 2px 10px; border-radius: 999px; border: 1px solid rgba(22,100,255,.26); background: rgba(240,246,255,.92); color: var(--accent); font-size: 12px; font-weight: 700; line-height: 1.7; cursor: pointer; white-space: nowrap; transition: background .18s ease, border-color .18s ease, transform .18s ease; }
+.rpt-history-btn:hover { background: rgba(22,100,255,.14); border-color: rgba(22,100,255,.44); transform: translateY(-1px); }
+/* 修改记录弹窗（内容在 antd portal 里，:root 变量与类选择器同样生效）
+   注意：antd 6 的弹窗容器类名是 .ant-modal-container（不再是 .ant-modal-content），
+   必须把它的默认内边距（20px 24px）与圆角一起覆盖，否则头部渐变到不了边缘。 */
+.report-history-modal .ant-modal-container,
+.report-history-modal .ant-modal-content { padding: 0; border-radius: 20px; overflow: hidden; box-shadow: 0 32px 84px rgba(21,58,120,.26); }
+.report-history-modal .ant-modal-body { padding: 0; }
+/* ---- 以下 history-* 样式统一收在 .report-history-modal 作用域内（REPORT_CSS 是全局注入的） ---- */
+/* 头部：渐变底 + 图标徽章 + 标题/风险要点副标题 */
+.report-history-modal .history-head { position: relative; display: flex; align-items: center; gap: 14px; padding: 19px 22px; border-bottom: 1px solid var(--line); background: linear-gradient(135deg, #eaf3ff 0%, #f7fbff 58%, #ffffff 100%); }
+.report-history-modal .history-head::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(circle at 6% 0%, rgba(22,100,255,.16), transparent 48%); }
+.report-history-modal .history-head-icon { position: relative; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 13px; font-size: 19px; color: #fff; background: linear-gradient(135deg, #4f95ff, #1664ff 55%, #6d5dfc); box-shadow: 0 9px 22px rgba(22,100,255,.34); }
+.report-history-modal .history-head-txt { position: relative; flex: 1; min-width: 0; }
+.report-history-modal .history-head-txt h4 { margin: 0; font-size: 17px; font-weight: 800; letter-spacing: .4px; line-height: 1.35; color: var(--text); }
+.report-history-modal .history-head-txt p { margin: 3px 0 0; font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.report-history-modal .history-close { position: relative; flex: 0 0 auto; width: 30px; height: 30px; border: 0; border-radius: 9px; background: rgba(255,255,255,.72); color: var(--muted); font-size: 13px; line-height: 1; cursor: pointer; transition: background .18s ease, color .18s ease; }
+.report-history-modal .history-close:hover { background: rgba(22,100,255,.13); color: var(--accent); }
+/* 概览统计条 */
+.report-history-modal .history-stats { display: flex; flex-wrap: wrap; gap: 8px; padding: 14px 22px 0; }
+.report-history-modal .history-stat { display: inline-flex; align-items: baseline; gap: 5px; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--line); background: rgba(246,250,255,.9); font-size: 12px; color: var(--muted); }
+.report-history-modal .history-stat b { font-size: 13.5px; font-weight: 800; color: var(--accent); }
+/* 列表：竖向时间轴 —— 序号圆点 + 卡片 */
+.report-history-modal .history-list { margin: 0; padding: 14px 22px 16px; list-style: none; max-height: 52vh; overflow: auto; }
+.report-history-modal .history-list li { position: relative; padding: 0 0 14px 30px; }
+.report-history-modal .history-list li:last-child { padding-bottom: 0; }
+.report-history-modal .history-list li::before { content: ""; position: absolute; left: 8px; top: 24px; bottom: -2px; width: 2px; border-radius: 2px; background: linear-gradient(180deg, rgba(22,100,255,.3), rgba(22,100,255,.05)); }
+.report-history-modal .history-list li:last-child::before { display: none; }
+.report-history-modal .history-index { position: absolute; left: 0; top: 12px; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: linear-gradient(135deg, #77adff, #1664ff); color: #fff; font-size: 10.5px; font-weight: 800; font-variant-numeric: tabular-nums; box-shadow: 0 3px 9px rgba(22,100,255,.32); }
+.report-history-modal .history-card { padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; background: linear-gradient(180deg, #ffffff, #f8fbff); transition: border-color .18s ease, box-shadow .18s ease; }
+.report-history-modal .history-card:hover { border-color: rgba(22,100,255,.3); box-shadow: 0 10px 24px rgba(35,88,176,.1); }
+.report-history-modal .history-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.report-history-modal .history-avatar { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; font-size: 12px; font-weight: 800; color: #fff; background: linear-gradient(135deg, #63a6ff, #1664ff); }
+.report-history-modal .history-who { font-size: 13.5px; font-weight: 800; color: var(--text); }
+.report-history-modal .history-report { padding: 1px 7px; border-radius: 6px; background: rgba(109,93,252,.1); color: #5b4bd6; font-size: 11px; font-weight: 700; }
+.report-history-modal .history-time { margin-left: auto; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.report-history-modal .history-text { margin-top: 9px; padding: 9px 12px; border-left: 3px solid rgba(22,100,255,.34); border-radius: 0 10px 10px 0; background: rgba(238,245,255,.72); font-size: 13.5px; line-height: 1.85; color: var(--text); white-space: pre-wrap; word-break: break-word; }
+.report-history-modal .history-label { font-weight: 800; color: var(--accent); }
+/* 底部说明 */
+.report-history-modal .history-foot { display: flex; align-items: center; gap: 7px; padding: 11px 22px; border-top: 1px solid var(--line); background: rgba(247,251,255,.86); font-size: 12px; color: var(--muted); }
+/* 空态 */
+.report-history-modal .history-empty { display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 40px 0 46px; color: var(--muted); font-size: 13px; }
+.report-history-modal .history-empty-icon { display: inline-flex; align-items: center; justify-content: center; width: 46px; height: 46px; margin-bottom: 3px; border-radius: 15px; font-size: 21px; color: var(--accent); background: rgba(22,100,255,.08); }
+.report-history-modal .history-empty strong { font-size: 14.5px; font-weight: 800; color: var(--text); }
+.report-history-modal .history-status { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 34px 0; color: var(--muted); font-size: 14px; }
+.report-history-modal .history-status.is-error { color: #c0392b; }
 .ai-risk-row { cursor: pointer; transition: background .18s ease; }
 .ai-risk-row:hover { background: rgba(227,239,255,.45); }
 .ai-risk-row.adopted { background: rgba(236,253,245,.86); }
@@ -353,12 +387,39 @@ function resolveRiskTarget(item: AIRiskItem): HTMLElement | null {
   }) ?? null;
 }
 
+/**
+ * 同步正文规则块末尾的「修改记录(N)」按钮
+ * <p>它是渲染后注入的**真实 DOM**（不是 pseudo，因为需要可点击），而编辑功能会把整块
+ * innerHTML 换成 textarea、保存/取消时再整体写回，所以经手 innerHTML 的三处
+ * （绑定、保存、取消）都必须重新同步一次；无修改记录时移除按钮。</p>
+ * <p>注入时机必须在 {@code item.bodyHtml} 快照**之后**，否则按钮会被当成正文内容存进编辑快照。</p>
+ */
+function syncHistoryButton(item: AIRiskItem, block: HTMLElement): void {
+  const count = item.editCount ?? 0;
+  const existed = block.querySelector<HTMLButtonElement>(':scope > .rpt-history-btn');
+  if (count <= 0) {
+    existed?.remove();
+    return;
+  }
+  const btn = existed ?? document.createElement('button');
+  if (!existed) {
+    btn.type = 'button';
+    btn.className = 'rpt-history-btn';
+    btn.setAttribute('data-ai-risk-history', String(item.id));
+    block.appendChild(btn);
+  }
+  btn.textContent = `修改记录(${count})`;
+}
+
 /** 取元素的待编辑纯文本：块级子节点之间补换行，避免多段正文在 textarea 里被压成一行 */
 function elementEditableText(el: HTMLElement): string {
   const blocks = Array.from(el.querySelectorAll<HTMLElement>('p, li, tr'));
   const parts = blocks.map(n => (n.textContent ?? '').trim()).filter(Boolean);
   if (parts.length) return parts.join('\n');
-  return (el.textContent ?? '').trim();
+  // 兜底：整块 textContent。必须剔除渲染后注入的「修改记录」按钮文字，否则会被当成正文带进编辑框
+  const clone = el.cloneNode(true) as HTMLElement;
+  clone.querySelectorAll('.rpt-history-btn').forEach(n => n.remove());
+  return (clone.textContent ?? '').trim();
 }
 
 /** 编辑结果 → 正文 HTML：先转义，再把换行还原为 <br/>，保证多行内容渲染不塌成一行 */
@@ -434,12 +495,7 @@ function aiRiskTableHTML(list: AIRiskItem[], activeId: number | null = null): st
                 </div>
               </td>
               <td style="text-align:center;font-weight:800">${item.id}</td>
-              <td>
-                <strong>${escapeHtml(item.ruleName)}</strong>
-                ${(item.editCount ?? 0) > 0
-                  ? `<button class="ai-risk-history-btn" data-ai-risk-history="${item.id}" type="button">修改记录(${item.editCount})</button>`
-                  : ''}
-              </td>
+              <td><strong>${escapeHtml(item.ruleName)}</strong></td>
               <td class="risk-desc">${escapeHtml(item.riskDesc)}</td>
               <td>${escapeHtml(item.chapter)}</td>
               <td>${statusBadge(item.status)}</td>
@@ -469,6 +525,7 @@ function downloadWord(filename: string, title: string, bodyHtml: string) {
     .ai-risk-paragraph{position:static;border:0;background:none;padding:0}
     .ai-risk-paragraph::before{content:none}
     .ai-risk-edit-actions{display:none!important}
+    .rpt-history-btn{display:none!important}
   </style></head><body><h1>${escapeHtml(title)}</h1>${bodyHtml}</body></html>`;
   const blob = new Blob([content], { type: 'application/msword;charset=utf-8' });
   const link = document.createElement('a');
@@ -631,6 +688,8 @@ export default function ReportView() {
       target.classList.remove('adopted', 'invalid');
       if (item.status === 'adopted') target.classList.add('adopted');
       if (item.status === 'invalid') target.classList.add('invalid');
+      // 放在 bodyHtml 快照之后注入，避免「修改记录」按钮被当成正文存进编辑快照
+      syncHistoryButton(item, target);
     });
   }, [aiRiskList, visibleSections, loading]);
 
@@ -721,6 +780,18 @@ export default function ReportView() {
     [aiRiskList, checkTaskNo],
   );
 
+  /** 修改记录弹窗的概览统计（次数 / 人数 / 最近一次时间），仅用于弹窗头部展示 */
+  const editHistorySummary = useMemo(() => {
+    const list = editHistory?.list ?? [];
+    if (!list.length) return null;
+    const people = new Set(list.map(l => l.operatorName || l.operatorNo || '未知用户'));
+    return {
+      count: list.length,
+      people: people.size,
+      latest: fmtDateTime(list[0]?.inputtime),
+    };
+  }, [editHistory]);
+
   /* ---- 表格行点击：定位到正文 ---- */
   const locateAIRisk = useCallback(
     (id: number, flash = true) => {
@@ -789,6 +860,8 @@ export default function ReportView() {
       const prevText = item.bodyText;
       const prevStatus = item.status;
       const prevDesc = item.riskDesc;
+      // 后端「内容没变则不写归档」，前端按同一口径决定是否给修改记录数 +1
+      const contentChanged = nextHtml !== (prevHtml ?? '');
 
       // ① 乐观更新：先呈现新文案（列表与正文为同一份文案，一并更新）
       item.bodyText = value;
@@ -798,6 +871,8 @@ export default function ReportView() {
       para.classList.remove('editing', 'invalid');
       para.classList.add('adopted');
       para.innerHTML = nextHtml;
+      // innerHTML 被整体换掉，重新挂回「修改记录(N)」按钮
+      syncHistoryButton(item, para);
       setAIRiskList(prev => [...prev]);
       setEditingAIRiskId(null);
 
@@ -807,6 +882,11 @@ export default function ReportView() {
           throw new Error('该内容块缺少编号，无法保存');
         }
         await reportApi.instanceBlockContent(currentReportNo, item.blockCode, nextHtml);
+        if (contentChanged) {
+          item.editCount = (item.editCount ?? 0) + 1;
+          syncHistoryButton(item, para);
+          setAIRiskList(prev => [...prev]);
+        }
         showToast('正文已保存', 'success');
       } catch (e: any) {
         // ③ 失败回滚为编辑前的内容与状态
@@ -817,6 +897,7 @@ export default function ReportView() {
         para.classList.remove('adopted');
         if (prevStatus === 'invalid') para.classList.add('invalid');
         para.innerHTML = prevHtml ?? '';
+        syncHistoryButton(item, para);
         setAIRiskList(prev => [...prev]);
         showToast(e?.message || '正文保存失败，已恢复为修改前内容', 'error');
       }
@@ -837,6 +918,8 @@ export default function ReportView() {
         para.classList.add('adopted');
       }
       para.innerHTML = item.bodyHtml ?? escapeHtml(item.bodyText ?? '');
+      // innerHTML 被整体还原，重新挂回「修改记录(N)」按钮
+      syncHistoryButton(item, para);
       setEditingAIRiskId(null);
     },
     [aiRiskList],
@@ -976,6 +1059,13 @@ export default function ReportView() {
         if (action === 'cancel') cancelAIRiskParagraph(id);
         return;
       }
+      // 正文规则块末尾的「修改记录(N)」按钮：打开历史弹窗，不进入编辑（必须排在段落分支之前）
+      const historyBtn = target.closest<HTMLElement>('[data-ai-risk-history]');
+      if (historyBtn) {
+        event.stopPropagation();
+        openEditHistory(Number(historyBtn.getAttribute('data-ai-risk-history')));
+        return;
+      }
       // AI 风险段落：进入编辑
       const para = target.closest<HTMLElement>('.ai-risk-paragraph');
       if (para) {
@@ -1004,7 +1094,7 @@ export default function ReportView() {
         if (moduleId && section) showProvenance(moduleId, section.title);
       }
     },
-    [editAIRiskParagraph, saveAIRiskParagraph, cancelAIRiskParagraph, sections, showProvenance],
+    [editAIRiskParagraph, saveAIRiskParagraph, cancelAIRiskParagraph, openEditHistory, sections, showProvenance],
   );
 
   /* ---- 侧栏事件代理 ---- */
@@ -1298,30 +1388,68 @@ export default function ReportView() {
       <Modal
         open={!!editHistory}
         centered
-        width={640}
+        width={660}
         footer={null}
+        closable={false}
+        title={null}
         onCancel={() => setEditHistory(null)}
         className="report-history-modal"
-        title={editHistory ? `修改记录 · ${editHistory.ruleName}` : '修改记录'}
       >
+        {/* 头部：图标 + 标题 + 风险要点名（自定义头部，不用 antd title，便于做渐变与副标题） */}
+        <div className="history-head">
+          <span className="history-head-icon" aria-hidden><HistoryOutlined /></span>
+          <div className="history-head-txt">
+            <h4>修改记录</h4>
+            <p title={editHistory?.ruleName || ''}>{editHistory?.ruleName || '—'}</p>
+          </div>
+          <button className="history-close" type="button" onClick={() => setEditHistory(null)} aria-label="关闭">✕</button>
+        </div>
+
         {editHistory?.loading ? (
           <div className="history-status"><Spin size="small" /><span>加载中…</span></div>
         ) : editHistory?.error ? (
           <div className="history-status is-error">{editHistory.error}</div>
         ) : (editHistory?.list.length ?? 0) === 0 ? (
-          <div className="history-status">暂无修改记录</div>
+          <div className="history-empty">
+            <span className="history-empty-icon" aria-hidden><HistoryOutlined /></span>
+            <strong>暂无修改记录</strong>
+            <span>该风险要点还没有被人工编辑过</span>
+          </div>
         ) : (
-          <ol className="history-list">
-            {editHistory!.list.map((log, index) => (
-              <li key={`${log.reportNo ?? ''}-${log.inputtime ?? ''}-${index}`}>
-                <span className="history-seq">{index + 1}、</span>
-                <span className="history-who">{log.operatorName || log.operatorNo || '未知用户'}</span>
-                <span className="history-time">{fmtDateTime(log.inputtime)}</span>
-                <span className="history-action">修改为：</span>
-                <span className="history-text">{editLogPlainText(log.contentAfter)}</span>
-              </li>
-            ))}
-          </ol>
+          <>
+            {editHistorySummary && (
+              <div className="history-stats">
+                <span className="history-stat">共 <b>{editHistorySummary.count}</b> 次修改</span>
+                <span className="history-stat"><b>{editHistorySummary.people}</b> 位修改人</span>
+                <span className="history-stat">最近 <b>{editHistorySummary.latest}</b></span>
+              </div>
+            )}
+            <ol className="history-list">
+              {editHistory!.list.map((log, index) => {
+                const who = log.operatorName || log.operatorNo || '未知用户';
+                return (
+                  <li key={`${log.reportNo ?? ''}-${log.inputtime ?? ''}-${index}`}>
+                    <span className="history-index">{index + 1}</span>
+                    <div className="history-card">
+                      <div className="history-meta">
+                        <span className="history-avatar" aria-hidden>{who.slice(0, 1)}</span>
+                        <span className="history-who">{who}</span>
+                        {log.reportNo && <span className="history-report">{log.reportNo}</span>}
+                        <span className="history-time">{fmtDateTime(log.inputtime)}</span>
+                      </div>
+                      <div className="history-text">
+                        <span className="history-label">修改为：</span>
+                        {editLogPlainText(log.contentAfter)}
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+            <div className="history-foot">
+              <span>归档维度：同一日检流水号 + 同一风险要点，跨版本累计</span>
+            </div>
+          </>
         )}
       </Modal>
     </div>
