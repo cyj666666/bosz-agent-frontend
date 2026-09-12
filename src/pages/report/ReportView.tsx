@@ -15,7 +15,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Spin, Select, Modal } from 'antd';
 import { CopyOutlined, CheckOutlined, HistoryOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import { useReportInstanceApi } from '../../hooks/useReportInstanceApi';
-import { reportApi, type ReportRiskEditLogItem } from '../../api/report';
+import { reportApi, type ReportAiAnalysisItem, type ReportRiskEditLogItem } from '../../api/report';
 import {
   type AIRiskItem,
   type AIRiskStatus,
@@ -333,6 +333,37 @@ tr:last-child td { border-bottom: 0; }
 .side-panel:not(.expanded) .ai-full-sub-item { padding-left: 14px; }
 .side-panel:not(.expanded) .ai-full-conclusion-box { padding: 12px 14px; margin-top: 14px; }
 .side-panel:not(.expanded) .ai-full-report-footer { flex-direction: column; gap: 4px; margin-top: 16px; padding-top: 10px; }
+/* ---- AI 分析全文面板：状态态（读取中 / 未分析 / 进行中 / 失败）与已完成结果 ---- */
+.ai-full-state { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 330px; padding: 34px 26px; text-align: center; }
+.ai-full-state-icon { display: inline-flex; align-items: center; justify-content: center; width: 52px; height: 52px; margin-bottom: 16px; border-radius: 16px; font-size: 24px; font-weight: 800; color: var(--accent); background: rgba(22,100,255,.09); }
+.ai-full-state.is-error .ai-full-state-icon { color: #c0392b; background: rgba(192,57,43,.09); }
+.ai-full-spinner { width: 44px; height: 44px; margin-bottom: 18px; border-radius: 50%; border: 3px solid rgba(22,100,255,.16); border-top-color: var(--accent); animation: reportStateSpin .85s linear infinite; }
+.ai-full-state-title { font-size: 15.5px; font-weight: 800; color: var(--text); }
+.ai-full-state-desc { margin: 9px 0 0; max-width: 390px; font-size: 13px; line-height: 1.85; color: var(--muted); word-break: break-word; }
+.ai-full-btn { margin-top: 18px; padding: 8px 22px; border: 1px solid transparent; border-radius: 10px; font-size: 13.5px; font-weight: 800; color: #fff; background: linear-gradient(135deg, #4f95ff, #1664ff); cursor: pointer; box-shadow: 0 8px 20px rgba(22,100,255,.26); transition: transform .18s ease, box-shadow .18s ease; }
+.ai-full-btn:hover { transform: translateY(-1px); box-shadow: 0 10px 24px rgba(22,100,255,.32); }
+.ai-full-btn.ghost { color: var(--accent); background: rgba(22,100,255,.08); border-color: rgba(22,100,255,.26); box-shadow: none; }
+.ai-full-btn.ghost:hover { background: rgba(22,100,255,.14); box-shadow: none; }
+/* 已完成：元信息条 + 模型输出的 HTML 片段 */
+.ai-full-result { padding: 4px 0 10px; }
+.ai-full-result-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line); background: rgba(246,250,255,.9); }
+.ai-full-result-meta { flex: 1; min-width: 0; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-full-result-bar .ai-full-btn { margin-top: 0; padding: 5px 14px; font-size: 12.5px; }
+.ai-full-result-body { font-size: 13.5px; line-height: 1.9; color: var(--text); word-break: break-word; }
+.ai-full-result-body h3 { margin: 18px 0 9px; padding-left: 11px; border-left: 4px solid var(--accent); font-size: 14.5px; font-weight: 800; color: #0b2b44; line-height: 1.5; }
+.ai-full-result-body h3:first-child, .ai-full-result-body h4:first-child { margin-top: 0; }
+.ai-full-result-body h4 { margin: 14px 0 7px; font-size: 13.5px; font-weight: 800; color: #143750; }
+.ai-full-result-body p { margin: 0 0 11px; text-align: justify; }
+.ai-full-result-body ul, .ai-full-result-body ol { margin: 0 0 12px; padding-left: 22px; }
+.ai-full-result-body li { margin-bottom: 6px; text-align: justify; }
+.ai-full-result-body strong { color: #0f3b57; }
+.ai-full-result-body table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 12.5px; }
+.ai-full-result-body th, .ai-full-result-body td { border: 1px solid var(--line); padding: 6px 8px; text-align: left; }
+.ai-full-result-body th { background: rgba(237,244,255,.9); font-weight: 800; }
+/* 全屏浮层下空间更宽，字号随之放大 */
+.side-panel.expanded .ai-full-result-body { font-size: 14.5px; }
+.side-panel.expanded .ai-full-result-body h3 { font-size: 16px; }
+.side-panel.expanded .ai-full-result-body h4 { font-size: 15px; }
 /* 加载态 / 错误态：占满内容区并居中。
    MainLayout 的 Content 高度 = calc(100vh - 96px)（Header 64 + margin 16×2），
    用同一个算式保证在「内容区正中」，而不是贴在顶部。 */
@@ -534,6 +565,61 @@ function sourcePanelHtml(groups: SourceGroup[]): string {
   return groups.map(item => `<section class="source-block"><h4>${escapeHtml(item.groupTitle)}</h4>${item.html}</section>`).join('');
 }
 
+/* =============================================================================
+ * AI 分析全文面板（四种状态）
+ * ---------------------------------------------------------------------------
+ * 从未分析 → 空态 + 「开始分析」（点击先弹确认框）
+ * 进行中   → 转圈提示 + 「收起面板」（后台照跑，重新打开凭状态判断）
+ * 失败     → 原因 + 「重新分析」
+ * 已完成   → 元信息条 + 模型输出的成品 HTML 片段
+ * ⚠️ 面板 body 是 dangerouslySetInnerHTML 注入的，按钮靠 data-ai-full-action 做事件委托。
+ * ========================================================================== */
+function aiFullPanelHTML(item: ReportAiAnalysisItem | null, reading: boolean): string {
+  if (reading) {
+    return `<div class="ai-full-state">
+      <span class="ai-full-spinner"></span>
+      <div class="ai-full-state-title">正在读取分析状态…</div>
+    </div>`;
+  }
+  if (!item) {
+    return `<div class="ai-full-state">
+      <span class="ai-full-state-icon" aria-hidden>◎</span>
+      <div class="ai-full-state-title">尚未进行全文分析</div>
+      <p class="ai-full-state-desc">将整合本报告的正文内容与相关业务数据，由大模型输出一份全文分析结论。</p>
+      <button class="ai-full-btn" type="button" data-ai-full-action="start">开始分析</button>
+    </div>`;
+  }
+  if (item.status === 'RUNNING') {
+    return `<div class="ai-full-state">
+      <span class="ai-full-spinner"></span>
+      <div class="ai-full-state-title">全文分析进行中…</div>
+      <p class="ai-full-state-desc">分析在后台运行，收起面板不会中断；稍后重新打开即可查看结果。</p>
+      <button class="ai-full-btn ghost" type="button" data-ai-full-action="close">收起面板</button>
+    </div>`;
+  }
+  if (item.status === 'FAILED') {
+    return `<div class="ai-full-state is-error">
+      <span class="ai-full-state-icon" aria-hidden>!</span>
+      <div class="ai-full-state-title">全文分析失败</div>
+      <p class="ai-full-state-desc">${escapeHtml(item.failReason || '未返回失败原因')}</p>
+      <button class="ai-full-btn" type="button" data-ai-full-action="start">重新分析</button>
+    </div>`;
+  }
+  const meta = [
+    item.modelName ? `模型 ${escapeHtml(item.modelName)}` : '',
+    item.costMillis ? `耗时 ${(item.costMillis / 1000).toFixed(1)}s` : '',
+    item.generateTime ? `完成于 ${fmtDateTime(item.generateTime)}` : '',
+    item.operatorName ? `由 ${escapeHtml(item.operatorName)} 触发` : '',
+  ].filter(Boolean).join(' · ');
+  return `<div class="ai-full-result">
+    <div class="ai-full-result-bar">
+      <span class="ai-full-result-meta" title="${escapeHtml(meta)}">${meta}</span>
+      <button class="ai-full-btn ghost" type="button" data-ai-full-action="start">重新分析</button>
+    </div>
+    <div class="ai-full-result-body">${item.analysisContent ?? ''}</div>
+  </div>`;
+}
+
 function downloadWord(filename: string, title: string, bodyHtml: string) {
   const content = `<html><head><meta charset="utf-8"><style>
     body{font-family:"Microsoft YaHei",sans-serif;color:#10233f;line-height:1.7}
@@ -612,7 +698,10 @@ export default function ReportView() {
     sections,
     aiRiskList,
     sourceTemplates,
-    aiFullAnalysisHtml,
+    aiAnalysis,
+    aiAnalysisLoading,
+    startAiAnalysis,
+    reloadAiAnalysis,
     setAIRiskList,
     versions,
     currentReportNo,
@@ -1030,6 +1119,29 @@ export default function ReportView() {
     }
   }, [currentReportNo, showToast]);
 
+  /* ---- AI 全文分析：先确认再触发。分析在后台跑，前端凭 status 轮询 ---- */
+  const handleStartAiAnalysis = useCallback(() => {
+    Modal.confirm({
+      title: '开始全文分析',
+      centered: true,
+      content: '将整合本报告的正文内容与相关业务数据，调用大模型生成一份全文分析。'
+        + '分析在后台运行、耗时可能较长，期间可收起面板继续浏览报告。确认开始吗？',
+      okText: '开始分析',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await startAiAnalysis();
+          showToast('已提交，全文分析进行中', 'success');
+        } catch (e: any) {
+          // 已有进行中的分析时后端返回「全文分析进行中，请稍后再试」
+          showToast(e?.message || '发起全文分析失败', 'error');
+          // 顺手刷新一次，让面板切到「进行中」的真实状态
+          void reloadAiAnalysis();
+        }
+      },
+    });
+  }, [startAiAnalysis, reloadAiAnalysis, showToast]);
+
   /* ---- 顶栏按钮：word 下载 ---- */
   const handleDownload = useCallback(() => {
     // 免责声明不在 .section-card 里，必须单独取出来放到最前，否则导出的 Word 会漏掉它
@@ -1150,6 +1262,15 @@ export default function ReportView() {
   const onSidePanelClick = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
       const target = event.target as HTMLElement;
+      // AI 全文分析面板：开始 / 重新分析（先弹确认框）、收起面板（后台继续跑）
+      const aiFullBtn = target.closest<HTMLElement>('[data-ai-full-action]');
+      if (aiFullBtn) {
+        event.stopPropagation();
+        const action = aiFullBtn.getAttribute('data-ai-full-action');
+        if (action === 'close') collapsePanel();
+        else if (action === 'start') handleStartAiAnalysis();
+        return;
+      }
       const actionBtn = target.closest<HTMLElement>('[data-ai-risk-action]');
       if (actionBtn) {
         const id = Number(actionBtn.getAttribute('data-ai-risk-id'));
@@ -1171,7 +1292,7 @@ export default function ReportView() {
         locateAIRisk(id, true);
       }
     },
-    [setAIRiskStatus, locateAIRisk, openEditHistory],
+    [setAIRiskStatus, locateAIRisk, openEditHistory, handleStartAiAnalysis, collapsePanel],
   );
 
   /* ---- 侧栏标题与内容 ---- */
@@ -1184,9 +1305,9 @@ export default function ReportView() {
   const sidePanelBody = useMemo(() => {
     // 行高亮随数据一起生成（activeAIRiskId 参与），避免被重渲染冲掉
     if (sidePanelContent.type === 'aiRisk') return aiRiskTableHTML(aiRiskList, activeAIRiskId);
-    if (sidePanelContent.type === 'aiFull') return aiFullAnalysisHtml;
+    if (sidePanelContent.type === 'aiFull') return aiFullPanelHTML(aiAnalysis, aiAnalysisLoading);
     return sourcePanelHtml(sourceTemplates[sidePanelContent.moduleId] ?? []);
-  }, [sidePanelContent, aiRiskList, aiFullAnalysisHtml, sourceTemplates, activeAIRiskId]);
+  }, [sidePanelContent, aiRiskList, aiAnalysis, aiAnalysisLoading, sourceTemplates, activeAIRiskId]);
 
   /* ---- Loading ---- */
   if (loading) {

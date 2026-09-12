@@ -97,6 +97,33 @@ export interface ReportInstanceRisk {
   editCount?: number;
 }
 
+/** AI 全文分析记录（详情页「AI分析全文」面板数据源） */
+export interface ReportAiAnalysisItem {
+  id?: number;
+  reportNo?: string;
+  checkTaskNo?: string;
+  /** RUNNING-进行中 / DONE-已完成 / FAILED-失败 */
+  status?: 'RUNNING' | 'DONE' | 'FAILED';
+  /** 分析正文（成品 HTML 片段，直接渲染） */
+  analysisContent?: string;
+  /** 综合结论摘要 */
+  summary?: string;
+  /** 大模型给出的总体风险等级 */
+  riskLevel?: string;
+  /** 实际调用的模型名 */
+  modelName?: string;
+  operatorName?: string;
+  operatorNo?: string;
+  /** 大模型调用耗时（毫秒） */
+  costMillis?: number;
+  /** 失败原因（status=FAILED 时有值） */
+  failReason?: string;
+  /** 完成时间 */
+  generateTime?: string;
+  /** 触发时间 */
+  inputtime?: string;
+}
+
 /** 风险要点修改记录项（详情页「修改记录」弹窗数据源） */
 export interface ReportRiskEditLogItem {
   /** 是否为「原始版本」（AI 生成的第一版内容）；后端置顶补的人造条目，仅首条可能为 true */
@@ -195,4 +222,28 @@ export const reportApi = {
     expectOk(get<ReportRiskEditLogItem[]>(
       `/report/instance/block/edit-history?checkTaskNo=${encodeURIComponent(checkTaskNo)}`
       + `&blockCode=${encodeURIComponent(blockCode)}`)),
+
+  /* ---------------- AI 全文分析（前端手动触发，后台异步执行，前端按状态轮询） ---------------- */
+
+  /** 取某日检流水号下「最新版本报告」的最新一次全文分析；从未分析过 data 为 null */
+  instanceAiAnalysis: (checkTaskNo: string) =>
+    expectOk(get<ReportAiAnalysisItem | null>(
+      `/report/instance/ai-analysis?checkTaskNo=${encodeURIComponent(checkTaskNo)}`)),
+
+  /** 某份报告的全部全文分析记录（保留多次，最新在上） */
+  instanceAiAnalysisList: (reportNo: string) =>
+    expectOk(get<ReportAiAnalysisItem[]>(
+      `/report/instance/ai-analysis/list?reportNo=${encodeURIComponent(reportNo)}`)),
+
+  /** 触发一次全文分析（异步）；同一报告已有进行中的分析时后端返回 code!=200 */
+  instanceAiAnalysisGenerate: (reportNo: string) =>
+    expectOk(post<ReportAiAnalysisItem>('/report/instance/ai-analysis/generate', { reportNo })),
+
+  /** 重新分析（失败重试 / 再跑一次），新增一条记录、保留历史 */
+  instanceAiAnalysisRetry: (reportNo: string) =>
+    expectOk(post<ReportAiAnalysisItem>('/report/instance/ai-analysis/retry', { reportNo })),
+
+  /** 查单次全文分析详情 */
+  instanceAiAnalysisDetail: (id: number) =>
+    expectOk(get<ReportAiAnalysisItem | null>(`/report/instance/ai-analysis/${id}`)),
 };

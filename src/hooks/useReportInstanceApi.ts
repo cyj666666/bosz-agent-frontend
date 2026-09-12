@@ -20,7 +20,7 @@
  *     故用该文案全量文本作为 keywords，正文段落据此自动挂上 ai-risk-paragraph
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { reportApi, type ReportInstanceBlock, type ReportInstanceCatalog, type ReportInstanceDetail, type ReportVersionItem } from '../api/report';
+import { reportApi, type ReportAiAnalysisItem, type ReportInstanceBlock, type ReportInstanceCatalog, type ReportInstanceDetail, type ReportVersionItem } from '../api/report';
 import type { AIRiskItem, AIRiskStatus, ReportMeta, SectionItem, SourceTemplateMap } from './useReportApi';
 
 /** 章节（带"是否有溯源按钮"标记，供目录过滤与标识使用） */
@@ -190,7 +190,9 @@ export function useReportInstanceApi(checkTaskNo: string | undefined) {
   const [sections, setSections] = useState<SectionWithSource[]>([]);
   const [aiRiskList, setAIRiskList] = useState<AIRiskItem[]>([]);
   const [sourceTemplates] = useState<SourceTemplateMap>({});
-  const [aiFullAnalysisHtml] = useState('');
+  /** AI 全文分析：最近一次分析记录（null = 该报告从未分析过）+ 首次加载态 */
+  const [aiAnalysis, setAiAnalysis] = useState<ReportAiAnalysisItem | null>(null);
+  const [aiAnalysisLoading, setAiAnalysisLoading] = useState(false);
 
   // 版本相关：版本列表 + 当前查看的报告编号 + 更新报告状态
   const [versions, setVersions] = useState<ReportVersionItem[]>([]);
@@ -263,7 +265,44 @@ export function useReportInstanceApi(checkTaskNo: string | undefined) {
     return () => { cancelled = true; };
   }, [currentReportNo]);
 
-  // ③ 有进行中版本时轮询版本列表（感知生成完成）
+  // ③ AI 全文分析：跟着当前版本走，取该份报告「最近一次」分析（保留多次，列表最新在上）
+  useEffect(() => {
+    let cancelled = false;
+    if (!currentReportNo) {
+      setAiAnalysis(null);
+      return;
+    }
+    setAiAnalysisLoading(true);
+    reportApi.instanceAiAnalysisList(currentReportNo)
+      .then(res => {
+        if (!cancelled) setAiAnalysis((res.data ?? [])[0] ?? null);
+      })
+      .catch(() => { /* 静默：分析面板不可用不应影响报告阅读 */ })
+      .finally(() => {
+        if (!cancelled) setAiAnalysisLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [currentReportNo]);
+
+  /** 重新拉取当前报告的分析状态（手动刷新 / 轮询用） */
+  const reloadAiAnalysis = useCallback(async () => {
+    if (!currentReportNo) return;
+    try {
+      const res = await reportApi.instanceAiAnalysisList(currentReportNo);
+      setAiAnalysis((res.data ?? [])[0] ?? null);
+    } catch {
+      /* 轮询失败静默，下次再试 */
+    }
+  }, [currentReportNo]);
+
+  // ④ 分析进行中时按 10s 轮询，感知「完成 / 失败」（用户关掉面板也照跑，重启后凭状态判断）
+  useEffect(() => {
+    if (aiAnalysis?.status !== 'RUNNING' || !currentReportNo) return;
+    const timer = window.setInterval(() => { reloadAiAnalysis(); }, 10000);
+    return () => window.clearInterval(timer);
+  }, [aiAnalysis?.status, currentReportNo, reloadAiAnalysis]);
+
+  // ⑤ 有进行中版本时轮询版本列表（感知生成完成）
   useEffect(() => {
     if (!checkTaskNo || !runningVersion) return;
     const timer = window.setInterval(() => {
@@ -332,6 +371,19 @@ export function useReportInstanceApi(checkTaskNo: string | undefined) {
   /** 关闭"生成失败"提示 */
   const clearFailed = useCallback(() => setFailedVersion(null), []);
 
+  /**
+   * 触发一次全文分析（后台异步跑）。
+   * <p>后端会先落一条 RUNNING 记录再交给线程池，所以这里直接用返回值更新 UI，
+   * 不用再查一次（避免"查得比写入早"的时序问题）。</p>
+   * <p>同一报告已有进行中的分析时，后端返回业务错误「全文分析进行中，请稍后再试」，
+   * 由 expectOk 抛出，调用方捕获后提示即可。</p>
+   */
+  const startAiAnalysis = useCallback(async () => {
+    if (!currentReportNo) throw new Error('缺少报告编号，无法发起分析');
+    const res = await reportApi.instanceAiAnalysisGenerate(currentReportNo);
+    setAiAnalysis(res.data ?? null);
+  }, [currentReportNo]);
+
   const currentVersion = versions.find(v => v.reportNo === currentReportNo)?.version;
 
   return {
@@ -341,7 +393,10 @@ export function useReportInstanceApi(checkTaskNo: string | undefined) {
     sections,
     aiRiskList,
     sourceTemplates,
-    aiFullAnalysisHtml,
+    aiAnalysis,
+    aiAnalysisLoading,
+    startAiAnalysis,
+    reloadAiAnalysis,
     setAIRiskList,
     versions,
     currentReportNo,
