@@ -13,7 +13,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback, memo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Spin, Select, Modal } from 'antd';
-import { CopyOutlined, CheckOutlined, HistoryOutlined } from '@ant-design/icons';
+import { CopyOutlined, CheckOutlined, HistoryOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import { useReportInstanceApi } from '../../hooks/useReportInstanceApi';
 import { reportApi, type ReportRiskEditLogItem } from '../../api/report';
 import {
@@ -212,7 +212,7 @@ tr:last-child td { border-bottom: 0; }
 .report-history-modal .history-stat { display: inline-flex; align-items: baseline; gap: 5px; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--line); background: rgba(246,250,255,.9); font-size: 12px; color: var(--muted); }
 .report-history-modal .history-stat b { font-size: 13.5px; font-weight: 800; color: var(--accent); }
 /* 列表：竖向时间轴 —— 序号圆点 + 卡片 */
-.report-history-modal .history-list { margin: 0; padding: 14px 22px 16px; list-style: none; max-height: 52vh; overflow: auto; }
+.report-history-modal .history-list { margin: 0; padding: 14px 22px 16px; list-style: none; max-height: 56vh; overflow: auto; }
 .report-history-modal .history-list li { position: relative; padding: 0 0 14px 30px; }
 .report-history-modal .history-list li:last-child { padding-bottom: 0; }
 .report-history-modal .history-list li::before { content: ""; position: absolute; left: 8px; top: 24px; bottom: -2px; width: 2px; border-radius: 2px; background: linear-gradient(180deg, rgba(22,100,255,.3), rgba(22,100,255,.05)); }
@@ -227,6 +227,14 @@ tr:last-child td { border-bottom: 0; }
 .report-history-modal .history-time { margin-left: auto; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .report-history-modal .history-text { margin-top: 9px; padding: 9px 12px; border-left: 3px solid rgba(22,100,255,.34); border-radius: 0 10px 10px 0; background: rgba(238,245,255,.72); font-size: 13.5px; line-height: 1.85; color: var(--text); white-space: pre-wrap; word-break: break-word; }
 .report-history-modal .history-label { font-weight: 800; color: var(--accent); }
+/* 「原始版本」置顶条目：与人工修改记录做视觉区分（灰蓝 + 虚线边 + 「原」字序号） */
+.report-history-modal .history-list li.is-origin .history-index { background: linear-gradient(135deg, #a9b6c9, #71829a); box-shadow: 0 3px 9px rgba(93,115,150,.3); }
+.report-history-modal .history-list li.is-origin .history-card { border-style: dashed; border-color: rgba(93,115,150,.34); background: linear-gradient(180deg, #fcfdfe, #f4f7fb); }
+.report-history-modal .history-list li.is-origin .history-card:hover { border-color: rgba(93,115,150,.5); box-shadow: 0 10px 24px rgba(35,88,176,.08); }
+.report-history-modal .history-list li.is-origin .history-text { border-left-color: rgba(93,115,150,.42); background: rgba(240,244,249,.72); }
+.report-history-modal .history-list li.is-origin .history-label { color: #5d7396; }
+.report-history-modal .history-origin-badge { padding: 1px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 800; color: #40536e; background: rgba(93,115,150,.13); border: 1px solid rgba(93,115,150,.26); }
+.report-history-modal .history-origin-hint { font-size: 12px; color: var(--muted); }
 /* 底部说明 */
 .report-history-modal .history-foot { display: flex; align-items: center; gap: 7px; padding: 11px 22px; border-top: 1px solid var(--line); background: rgba(247,251,255,.86); font-size: 12px; color: var(--muted); }
 /* 空态 */
@@ -325,7 +333,22 @@ tr:last-child td { border-bottom: 0; }
 .side-panel:not(.expanded) .ai-full-sub-item { padding-left: 14px; }
 .side-panel:not(.expanded) .ai-full-conclusion-box { padding: 12px 14px; margin-top: 14px; }
 .side-panel:not(.expanded) .ai-full-report-footer { flex-direction: column; gap: 4px; margin-top: 16px; padding-top: 10px; }
-.report-loading { display: flex; align-items: center; justify-content: center; min-height: 360px; }
+/* 加载态 / 错误态：占满内容区并居中。
+   MainLayout 的 Content 高度 = calc(100vh - 96px)（Header 64 + margin 16×2），
+   用同一个算式保证在「内容区正中」，而不是贴在顶部。 */
+.report-state { flex: 1; display: flex; align-items: center; justify-content: center; min-height: calc(100vh - 96px); padding: 24px; }
+.report-state-card { display: flex; flex-direction: column; align-items: center; padding: 36px 56px; border-radius: 20px; border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.report-state-spinner { width: 44px; height: 44px; border-radius: 50%; border: 3px solid rgba(22,100,255,.16); border-top-color: var(--accent); animation: reportStateSpin .85s linear infinite; }
+@keyframes reportStateSpin { to { transform: rotate(360deg); } }
+.report-state-text { margin-top: 20px; font-size: 15px; font-weight: 800; letter-spacing: .6px; color: var(--text); }
+.report-state-hint { margin-top: 7px; font-size: 12.5px; color: var(--muted); }
+/* 免责声明：正文最前面的合规提示。用「风险提示」惯用的暖琥珀色系 + 实底标签 + 加粗文案，
+   保证一眼可见（用户反馈"不够显眼"）；与规则块（淡蓝）明确区分，实底标签也不会被误读为普通正文。 */
+.report-disclaimer { display: flex; gap: 14px; align-items: flex-start; padding: 15px 20px 16px 18px; border: 1px solid rgba(217,139,10,.36); border-left: 5px solid #d98b0a; border-radius: 12px; background: linear-gradient(180deg, #fffaf0, #fff2da); box-shadow: 0 6px 18px rgba(217,139,10,.10); }
+.report-disclaimer-icon { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; margin-top: 1px; border-radius: 10px; font-size: 16px; color: #fff; background: linear-gradient(135deg, #f0a52a, #d98b0a); box-shadow: 0 4px 12px rgba(217,139,10,.30); }
+.report-disclaimer-body { flex: 1; min-width: 0; }
+.report-disclaimer-tag { display: inline-block; padding: 2px 11px; border-radius: 999px; font-size: 12px; font-weight: 800; letter-spacing: .8px; color: #fff; background: linear-gradient(135deg, #f0a52a, #d98b0a); }
+.report-disclaimer-text { margin: 8px 0 0; font-size: 14px; font-weight: 700; line-height: 1.95; color: #6b4306; text-align: justify; }
 /* 三栏（目录 260 + 正文 + 侧栏 600）需要相当宽的视口；且本页外层还有 MainLayout 的 Sider，
    实际可用宽度 ≈ 窗口 - 232，所以断点要比直觉更靠右，否则正文会被压到 2~300px。
    故断点 1180 → 1300 → 1500 */
@@ -526,6 +549,11 @@ function downloadWord(filename: string, title: string, bodyHtml: string) {
     .ai-risk-paragraph::before{content:none}
     .ai-risk-edit-actions{display:none!important}
     .rpt-history-btn{display:none!important}
+    /* 免责声明：Word 不认 flex/渐变，拉平为普通带框段落，隐藏图标（svg 渲染不可控）；文案保持加粗 */
+    .report-disclaimer{display:block!important;border:1px solid #d9a13a;border-left:4px solid #d98b0a;background:#fff6e6;padding:9pt 11pt;margin:0 0 10pt}
+    .report-disclaimer-icon{display:none!important}
+    .report-disclaimer-tag{font-weight:bold;color:#8a5a08}
+    .report-disclaimer-text{margin:5pt 0 0;font-size:11pt;font-weight:bold;line-height:1.7;color:#6b4306}
   </style></head><body><h1>${escapeHtml(title)}</h1>${bodyHtml}</body></html>`;
   const blob = new Blob([content], { type: 'application/msword;charset=utf-8' });
   const link = document.createElement('a');
@@ -533,6 +561,22 @@ function downloadWord(filename: string, title: string, bodyHtml: string) {
   link.download = filename;
   link.click();
   URL.revokeObjectURL(link.href);
+}
+
+/* =============================================================================
+ * 加载态 / 错误态的共用外壳
+ * ---------------------------------------------------------------------------
+ * ⚠️ 必须在这里一并注入 REPORT_CSS：loading / error 两个分支是**提前 return**，
+ * 主分支里的 `<style>` 根本不会渲染 → 样式完全不生效。
+ * 历史上「报告加载中」没有居中、没有卡片样式，根因就是这个（不是 CSS 写错了）。
+ * ========================================================================== */
+function ReportStateShell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="report-root">
+      <style dangerouslySetInnerHTML={{ __html: REPORT_CSS }} />
+      <div className="report-state">{children}</div>
+    </div>
+  );
 }
 
 /* =============================================================================
@@ -780,15 +824,20 @@ export default function ReportView() {
     [aiRiskList, checkTaskNo],
   );
 
-  /** 修改记录弹窗的概览统计（次数 / 人数 / 最近一次时间），仅用于弹窗头部展示 */
+  /** 修改记录弹窗的概览统计（次数 / 人数 / 最近一次时间），仅用于弹窗头部展示。
+   *  排除后端置顶补的「原始版本」条目 —— 它不是一次人工修改，不计入次数与人数。
+   *  列表是「时间正序（最早在上）」，取"最近"不能靠下标，须按时间比较（避免顺序一变就取反）。 */
   const editHistorySummary = useMemo(() => {
-    const list = editHistory?.list ?? [];
+    const list = (editHistory?.list ?? []).filter(l => l.original !== true);
     if (!list.length) return null;
     const people = new Set(list.map(l => l.operatorName || l.operatorNo || '未知用户'));
+    const newest = [...list].sort(
+      (a, b) => new Date(b.inputtime ?? 0).getTime() - new Date(a.inputtime ?? 0).getTime(),
+    )[0];
     return {
       count: list.length,
       people: people.size,
-      latest: fmtDateTime(list[0]?.inputtime),
+      latest: fmtDateTime(newest?.inputtime),
     };
   }, [editHistory]);
 
@@ -986,9 +1035,12 @@ export default function ReportView() {
 
   /* ---- 顶栏按钮：word 下载 ---- */
   const handleDownload = useCallback(() => {
-    const bodyHtml = Array.from(document.querySelectorAll<HTMLElement>('.section-card'))
+    // 免责声明不在 .section-card 里，必须单独取出来放到最前，否则导出的 Word 会漏掉它
+    const disclaimerHtml = document.querySelector<HTMLElement>('.report-disclaimer')?.outerHTML ?? '';
+    const sectionsHtml = Array.from(document.querySelectorAll<HTMLElement>('.section-card'))
       .map(section => section.innerHTML)
       .join('<hr />');
+    const bodyHtml = [disclaimerHtml, sectionsHtml].filter(Boolean).join('<hr />');
     downloadWord(`${reportMeta.companyName}-日常贷后检查报告.doc`, `${reportMeta.companyName} ${reportMeta.subtitle}`, bodyHtml);
   }, [reportMeta]);
 
@@ -1142,15 +1194,19 @@ export default function ReportView() {
   /* ---- Loading ---- */
   if (loading) {
     return (
-      <div className="report-loading">
-        <Spin size="large" tip="报告加载中..." />
-      </div>
+      <ReportStateShell>
+        <div className="report-state-card">
+          <span className="report-state-spinner" aria-hidden />
+          <div className="report-state-text">报告加载中…</div>
+          <div className="report-state-hint">正在按模板组装报告内容，请稍候</div>
+        </div>
+      </ReportStateShell>
     );
   }
 
   if (error) {
     return (
-      <div className="report-loading">
+      <ReportStateShell>
         <div className="report-error">
           <p style={{ fontSize: 15, fontWeight: 500, marginBottom: 8 }}>报告加载失败</p>
           <p className="muted">{error}</p>
@@ -1158,7 +1214,7 @@ export default function ReportView() {
             请确认后端已启动、该日检流水号（checkTaskNo={checkTaskNo}）下已有报告记录，且已完成生成加工。
           </p>
         </div>
-      </div>
+      </ReportStateShell>
     );
   }
 
@@ -1271,6 +1327,16 @@ export default function ReportView() {
           )}
 
           <section className="report-sections" onClick={onSectionClick}>
+            {/* 免责声明：正文最前面的合规提示（固定文案，不来自模板内容块） */}
+            <div className="report-disclaimer">
+              <span className="report-disclaimer-icon" aria-hidden><SafetyCertificateOutlined /></span>
+              <div className="report-disclaimer-body">
+                <span className="report-disclaimer-tag">免责声明</span>
+                <p className="report-disclaimer-text">
+                  本报告由人工智能基于行内外授权数据及相关系统加工信息生成。内容仅供参考，用于辅助决策，不构成贷后检查的唯一或必须依据。依据金发[2026]8号文要求，最终决策以人工审批结果为准。
+                </p>
+              </div>
+            </div>
             {visibleSections.map(item => (
               <SectionCard key={item.id} item={item} />
             ))}
@@ -1384,11 +1450,12 @@ export default function ReportView() {
         )}
       </Modal>
 
-      {/* 修改记录弹窗：归档维度 = 同日检流水号 + 同风险要点（跨版本累计，最新在上） */}
+      {/* 修改记录弹窗：归档维度 = 同日检流水号 + 同风险要点（跨版本累计）；
+          列表时间正序：首位「原始版本」置顶，其后人工修改从早到晚 */}
       <Modal
         open={!!editHistory}
         centered
-        width={660}
+        width={880}
         footer={null}
         closable={false}
         title={null}
@@ -1426,19 +1493,33 @@ export default function ReportView() {
             )}
             <ol className="history-list">
               {editHistory!.list.map((log, index) => {
+                /* 首条「原始版本」由后端置顶补出（不在归档表里）：不参与序号编号，
+                   序号从 1 起只编人工修改记录 —— 故要减掉它的占位 */
+                const isOrigin = log.original === true;
+                const seq = index + 1 - (editHistory!.list[0]?.original ? 1 : 0);
                 const who = log.operatorName || log.operatorNo || '未知用户';
                 return (
-                  <li key={`${log.reportNo ?? ''}-${log.inputtime ?? ''}-${index}`}>
-                    <span className="history-index">{index + 1}</span>
+                  <li
+                    key={`${isOrigin ? 'origin' : log.reportNo ?? ''}-${log.inputtime ?? ''}-${index}`}
+                    className={isOrigin ? 'is-origin' : undefined}
+                  >
+                    <span className="history-index">{isOrigin ? '原' : seq}</span>
                     <div className="history-card">
-                      <div className="history-meta">
-                        <span className="history-avatar" aria-hidden>{who.slice(0, 1)}</span>
-                        <span className="history-who">{who}</span>
-                        {log.reportNo && <span className="history-report">{log.reportNo}</span>}
-                        <span className="history-time">{fmtDateTime(log.inputtime)}</span>
-                      </div>
+                      {isOrigin ? (
+                        <div className="history-meta">
+                          <span className="history-origin-badge">原始版本</span>
+                          <span className="history-origin-hint">AI 生成初稿</span>
+                        </div>
+                      ) : (
+                        <div className="history-meta">
+                          <span className="history-avatar" aria-hidden>{who.slice(0, 1)}</span>
+                          <span className="history-who">{who}</span>
+                          {log.reportNo && <span className="history-report">{log.reportNo}</span>}
+                          <span className="history-time">{fmtDateTime(log.inputtime)}</span>
+                        </div>
+                      )}
                       <div className="history-text">
-                        <span className="history-label">修改为：</span>
+                        <span className="history-label">{isOrigin ? '原文：' : '修改为：'}</span>
                         {editLogPlainText(log.contentAfter)}
                       </div>
                     </div>

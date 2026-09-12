@@ -99,12 +99,14 @@ export interface ReportInstanceRisk {
 
 /** 风险要点修改记录项（详情页「修改记录」弹窗数据源） */
 export interface ReportRiskEditLogItem {
-  /** 修改人姓名（取不到 real_name 时回落账号） */
+  /** 是否为「原始版本」（AI 生成的第一版内容）；后端置顶补的人造条目，仅首条可能为 true */
+  original?: boolean;
+  /** 修改人姓名（取不到 real_name 时回落账号；原始版本条目为空） */
   operatorName?: string;
   operatorNo?: string;
-  /** 修改时间 */
+  /** 修改时间（原始版本条目为空） */
   inputtime?: string;
-  /** 修改后文案 */
+  /** 修改后文案（原始版本条目即 AI 生成的第一版内容） */
   contentAfter?: string;
   /** 修改前文案（审计对比用） */
   contentBefore?: string;
@@ -187,7 +189,8 @@ export const reportApi = {
   instanceBlockContent: (reportNo: string, blockCode: string, content: string) =>
     expectOk(post<void>('/report/instance/block/content', { reportNo, blockCode, content })),
 
-  /** 查询某风险要点的修改记录（归档维度：同日检流水号 + 同风险要点；按修改时间倒序，最新在上） */
+  /** 查询某风险要点的修改记录（归档维度：同日检流水号 + 同风险要点；
+   *  时间正序返回，首位为置顶的「原始版本」条目，其后按修改时间从早到晚） */
   instanceBlockEditHistory: (checkTaskNo: string, blockCode: string) =>
     expectOk(get<ReportRiskEditLogItem[]>(
       `/report/instance/block/edit-history?checkTaskNo=${encodeURIComponent(checkTaskNo)}`
