@@ -12,7 +12,7 @@
  */
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Spin, Select } from 'antd';
+import { Spin, Select, Modal } from 'antd';
 import { useReportInstanceApi } from '../../hooks/useReportInstanceApi';
 import {
   type AIRiskItem,
@@ -26,6 +26,9 @@ type SidePanelContent =
   | { type: 'aiRisk' }
   | { type: 'aiFull' }
   | { type: 'source'; moduleId: string; moduleTitle: string };
+
+/** 版本号展示：后端存整数（1/2/3），前端拼 "V" 前缀；空值返回空串 */
+const fmtVersion = (v?: number | null): string => (v == null ? '' : `V${v}`);
 
 /* =============================================================================
  * 全部 CSS —— 从 V5.2 移植
@@ -109,6 +112,9 @@ const REPORT_CSS = `
 .source-link-btn::after { content: "↗"; font-size: 12px; }
 .report-error { max-width: 560px; padding: 28px 32px; border-radius: 18px; border: 1px solid var(--line); background: #fff; box-shadow: var(--shadow); text-align: center; }
 .report-error p { margin: 0; line-height: 1.7; }
+.report-running-tip { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; padding: 12px 18px; border-radius: 14px; border: 1px solid rgba(22,100,255,.22); background: linear-gradient(180deg, rgba(237,244,255,.96), rgba(255,255,255,.94)); color: #124a91; font-size: 14px; font-weight: 600; }
+.report-running-spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid rgba(22,100,255,.25); border-top-color: var(--accent); animation: reportRunningSpin .8s linear infinite; flex: 0 0 auto; }
+@keyframes reportRunningSpin { to { transform: rotate(360deg); } }
 .table-title { margin: 14px 0 8px; display: flex; align-items: center; gap: 8px; font-weight: 800; color: #12315d; }
 .table-title::before { content: ""; width: 4px; height: 16px; border-radius: 999px; background: var(--accent); display: inline-block; }
 .table-subtitle { margin: -2px 0 8px; color: var(--muted); font-size: 13px; }
@@ -318,7 +324,17 @@ export default function ReportView() {
     versions,
     currentReportNo,
     selectVersion,
+    runningVersion,
+    renewing,
+    renew,
+    reload,
+    completedVersion,
+    failedVersion,
+    clearFailed,
   } = useReportInstanceApi(checkTaskNo);
+
+  // 版本下拉只展示"进行中 + 已完成"，过滤掉失败（999）的记录
+  const displayVersions = useMemo(() => versions.filter(v => v.status !== '999'), [versions]);
 
   /* ---- 状态 ---- */
   const [filterDynamicOnly, setFilterDynamicOnly] = useState(false);
@@ -579,6 +595,39 @@ export default function ReportView() {
     downloadWord(`${reportMeta.companyName}-日常贷后检查报告.doc`, `${reportMeta.companyName} ${reportMeta.subtitle}`, bodyHtml);
   }, [reportMeta]);
 
+  /* ---- 顶栏：更新报告（新建版本，后端异步生成） ---- */
+  const handleRenew = useCallback(async () => {
+    try {
+      await renew();
+      showToast('已提交，新报告生成中');
+    } catch (e: any) {
+      showToast(e?.message || '更新报告失败');
+    }
+  }, [renew, showToast]);
+
+  /* ---- 新报告生成完成 → 弹框提示，确认后刷新 ---- */
+  useEffect(() => {
+    if (!completedVersion) return;
+    Modal.confirm({
+      title: '最新报告已生成',
+      content: '新版本报告已生成完成，点击「确认」后页面将自动刷新。',
+      okText: '确认',
+      cancelButtonProps: { style: { display: 'none' } },
+      onOk: () => { reload(); },
+    });
+  }, [completedVersion, reload]);
+
+  /* ---- 新报告生成失败 → 弹框提示（附失败原因），确认后关闭 ---- */
+  useEffect(() => {
+    if (!failedVersion) return;
+    Modal.error({
+      title: '新报告生成失败',
+      content: failedVersion.failReason || '报告生成过程发生异常，请稍后重试，或联系管理员查看日志。',
+      okText: '知道了',
+      onOk: () => { clearFailed(); },
+    });
+  }, [failedVersion, clearFailed]);
+
   /* ---- 章节内容 DOM 事件代理 ---- */
   const onSectionClick = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
@@ -729,15 +778,19 @@ export default function ReportView() {
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
                 <h1 className="report-company-title">{reportMeta.companyName}</h1>
-                {versions.length > 1 && (
+                {displayVersions.length > 1 && (
                   <Select
                     value={currentReportNo}
                     onChange={selectVersion}
-                    style={{ minWidth: 240 }}
+                    style={{ minWidth: 260 }}
                     placeholder="选择版本"
-                    options={versions.map(v => ({
+                    options={displayVersions.map(v => ({
                       value: v.reportNo,
-                      label: v.version ? `${v.version}（${v.reportNo}）` : v.reportNo,
+                      // 进行中的版本排在最前，标注"生成中"且不可选（尚无正文内容）
+                      label: v.status === '000'
+                        ? `${fmtVersion(v.version)}（${v.reportNo}）· 生成中`
+                        : (v.version != null ? `${fmtVersion(v.version)}（${v.reportNo}）` : v.reportNo),
+                      disabled: v.status === '000',
                     }))}
                   />
                 )}
@@ -748,6 +801,15 @@ export default function ReportView() {
             <div className="toolbar">
               <button className="ghost-btn" type="button" style={{ marginRight: 'auto' }} onClick={() => navigate('/reports')}>
                 ← 返回列表
+              </button>
+              <button
+                className="ghost-btn"
+                type="button"
+                disabled={renewing || !!runningVersion}
+                onClick={handleRenew}
+                title={runningVersion ? '已有报告正在生成中' : '在该日检流水号下生成一份新版本报告'}
+              >
+                {renewing ? '提交中…' : '更新报告'}
               </button>
               <button className="ghost-btn ai-risk-btn" type="button" onClick={() => showAIRiskPanel(true)}>
                 AI风险识别
@@ -760,6 +822,16 @@ export default function ReportView() {
               </button>
             </div>
           </header>
+
+          {/* 有进行中版本时提示：新报告生成中 */}
+          {runningVersion && (
+            <div className="report-running-tip">
+              <span className="report-running-spinner" />
+              <span>
+                新报告生成中（{runningVersion.version != null ? fmtVersion(runningVersion.version) : '新版'}），可先查看历史版本数据
+              </span>
+            </div>
+          )}
 
           <section className="report-sections" onClick={onSectionClick}>
             {visibleSections.map(item => (

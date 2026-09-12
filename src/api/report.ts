@@ -21,8 +21,8 @@ export interface ReportInstanceSummary {
   reportType?: string;
   /** 日检流水号（同一流水号下多个版本） */
   checkTaskNo?: string;
-  /** 版本号（V1/V2/V3） */
-  version?: string;
+  /** 版本号（整数 1/2/3…，展示时前端拼 V 前缀） */
+  version?: number;
   /** 111-待开始 000-进行中 888-已完成 999-失败 */
   status?: string;
   /** 失败原因（999 时记录技术类/业务类异常详情） */
@@ -85,8 +85,8 @@ export interface ReportInstanceDetail {
   reportTitle?: string;
   /** 日检流水号 */
   checkTaskNo?: string;
-  /** 版本号（V1/V2/V3） */
-  version?: string;
+  /** 版本号（整数 1/2/3…，展示时前端拼 V 前缀） */
+  version?: number;
   /** 111-待开始 000-进行中 888-已完成 999-失败 */
   status?: string;
   /** 更新时间（即"生成时间"） */
@@ -103,10 +103,12 @@ export interface ReportInstanceDetail {
 export interface ReportVersionItem {
   /** 报告编号（详情接口入参） */
   reportNo: string;
-  /** 版本号（V1/V2/V3） */
-  version?: string;
-  /** 报告状态 */
+  /** 版本号（整数 1/2/3…，展示时前端拼 V 前缀） */
+  version?: number;
+  /** 报告状态：000-进行中 888-已完成 999-失败 */
   status?: string;
+  /** 失败原因（status=999 时有值） */
+  failReason?: string;
   /** 更新时间 */
   updatedAt?: string;
 }
@@ -129,6 +131,10 @@ export const reportApi = {
   /** 某日检流水号下最新版本的报告详情 */
   instanceLatest: (checkTaskNo: string) =>
     get<ReportInstanceDetail>('/report/instance/latest', { checkTaskNo }),
+
+  /** 更新报告：在日检流水号下新建一份报告（新版本，后端异步生成） */
+  instanceRenew: (checkTaskNo: string) =>
+    post<ReportVersionItem>(`/report/instance/renew?checkTaskNo=${encodeURIComponent(checkTaskNo)}`),
 
   /** 按模板加工生成报告实例（含状态流转） */
   instanceGenerate: (reportNo: string) =>

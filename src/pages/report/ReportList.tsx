@@ -61,6 +61,7 @@ export default function ReportList() {
   };
 
   const columns = [
+    { title: "日检流水号", dataIndex: "checkTaskNo", width: 180 },
     { title: "企业名称", dataIndex: "customerName", width: 220 },
     { title: "报告编号", dataIndex: "reportNo", width: 190 },
     { title: "报告标题", dataIndex: "reportTitle" },
@@ -130,7 +131,7 @@ export default function ReportList() {
         dataSource={data}
         rowKey="reportNo"
         loading={loading}
-        scroll={{ x: 1100 }}
+        scroll={{ x: 1280 }}
       />
     </div>
   );

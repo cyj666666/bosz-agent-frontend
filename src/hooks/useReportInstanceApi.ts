@@ -1,10 +1,12 @@
 /**
  * 报告详情数据 hook —— 对接后端"模板化报告实例"接口
  *
- * 入参改为「日检流水号 checkTaskNo」：
+ * 入参为「日检流水号 checkTaskNo」：
  *   · 先调 GET /api/report/instance/versions?checkTaskNo=… 拿该流水号下所有版本
- *   · 默认选中最新版本（列表第一条），再调 GET /api/report/instance/{reportNo} 拿详情
+ *     （含进行中 000 与已完成 888）
+ *   · 默认选中「最新已完成版本」，再调 GET /api/report/instance/{reportNo} 拿详情
  *   · 切换版本时用选中版本的 reportNo 重新加载详情
+ *   · 存在进行中版本时轮询版本列表，检测到生成完成后回调（供页面弹框 + 刷新）
  *
  * 本 hook 负责把后端的"目录 + 内容块"结构，适配成报告详情页需要的"章节数组"结构：
  *   · 每个目录 → 一个章节（id=catalogCode，title=目录名）
@@ -17,7 +19,7 @@
  *   · RULE 类内容块的内容即风险正文，与 AI 风险列表的 riskDesc 是同一份文案，
  *     故用该文案全量文本作为 keywords，正文段落据此自动挂上 ai-risk-paragraph
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { reportApi, type ReportInstanceBlock, type ReportInstanceCatalog, type ReportInstanceDetail, type ReportVersionItem } from '../api/report';
 import type { AIRiskItem, AIRiskStatus, ReportMeta, SectionItem, SourceTemplateMap } from './useReportApi';
 
@@ -186,11 +188,20 @@ export function useReportInstanceApi(checkTaskNo: string | undefined) {
   const [sourceTemplates] = useState<SourceTemplateMap>({});
   const [aiFullAnalysisHtml] = useState('');
 
-  // 版本相关：版本列表 + 当前查看的报告编号
+  // 版本相关：版本列表 + 当前查看的报告编号 + 更新报告状态
   const [versions, setVersions] = useState<ReportVersionItem[]>([]);
   const [currentReportNo, setCurrentReportNo] = useState<string>('');
+  const [renewing, setRenewing] = useState(false);
+  const [completedVersion, setCompletedVersion] = useState<string | null>(null);
+  const [failedVersion, setFailedVersion] = useState<{ reportNo: string; failReason: string } | null>(null);
 
-  // ① 先查版本列表（checkTaskNo 变化时），默认选中最新版本（列表第一条）
+  // 进行中的版本（status=000）：存在时表示"新报告生成中"
+  const runningVersion = useMemo(
+    () => versions.find(v => v.status === '000') ?? null,
+    [versions],
+  );
+
+  // ① 先查版本列表（checkTaskNo 变化时），默认选中「最新已完成版本」
   useEffect(() => {
     let cancelled = false;
     if (!checkTaskNo) {
@@ -202,17 +213,21 @@ export function useReportInstanceApi(checkTaskNo: string | undefined) {
     setError(null);
     setVersions([]);
     setCurrentReportNo('');
+    setCompletedVersion(null);
+    setFailedVersion(null);
     reportApi.instanceVersions(checkTaskNo)
       .then(res => {
         if (cancelled) return;
         const list = res.data ?? [];
         setVersions(list);
-        if (list.length === 0) {
-          setError('该日检流水号下暂无报告版本');
+        // 默认展示「最新已完成版本」（进行中的版本无详情，不可选中）
+        const latestDone = list.find(v => v.status === '888');
+        if (!latestDone) {
+          setError('该日检流水号下暂无已完成版本的报告');
           setLoading(false);
           return;
         }
-        setCurrentReportNo(list[0].reportNo);
+        setCurrentReportNo(latestDone.reportNo);
       })
       .catch((e: any) => {
         if (!cancelled) {
@@ -244,10 +259,74 @@ export function useReportInstanceApi(checkTaskNo: string | undefined) {
     return () => { cancelled = true; };
   }, [currentReportNo]);
 
+  // ③ 有进行中版本时轮询版本列表（感知生成完成）
+  useEffect(() => {
+    if (!checkTaskNo || !runningVersion) return;
+    const timer = window.setInterval(() => {
+      reportApi.instanceVersions(checkTaskNo)
+        .then(res => setVersions(res.data ?? []))
+        .catch(() => { /* 轮询失败静默 */ });
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [checkTaskNo, runningVersion]);
+
+  // ④ 生成结果检测：原进行中的版本变为已完成（888）或失败（999）→ 置标志（供页面弹框）
+  const prevRunningRef = useRef<string | null>(null);
+  useEffect(() => {
+    const prev = prevRunningRef.current;
+    const curr = runningVersion?.reportNo ?? null;
+    if (prev && !curr) {
+      const result = versions.find(v => v.reportNo === prev);
+      if (result?.status === '888') {
+        setCompletedVersion(prev);
+      } else if (result?.status === '999') {
+        setFailedVersion({ reportNo: prev, failReason: result.failReason ?? '' });
+      }
+    }
+    prevRunningRef.current = curr;
+  }, [versions, runningVersion]);
+
   /** 切换版本：重新按 reportNo 加载详情 */
   const selectVersion = useCallback((reportNo: string) => {
     setCurrentReportNo(reportNo);
   }, []);
+
+  /** 更新报告：新建版本（后端异步生成），成功后刷新版本列表 */
+  const renew = useCallback(async () => {
+    if (!checkTaskNo) return;
+    setRenewing(true);
+    try {
+      const created = (await reportApi.instanceRenew(checkTaskNo)).data;
+      // 先用接口返回的新版本（status=000 生成中）占位，保证"生成中"选项立刻出现在下拉首位，
+      // 不依赖"再拉一次列表"的时序（生成耗时可能只有几百毫秒）
+      if (created?.reportNo) {
+        setVersions(prev => [created, ...prev.filter(v => v.reportNo !== created.reportNo)]);
+      }
+      // 再以服务端为准刷新一次（若生成已结束，此处会直接变为已完成）
+      const list = (await reportApi.instanceVersions(checkTaskNo)).data ?? [];
+      setVersions(list);
+    } finally {
+      setRenewing(false);
+    }
+  }, [checkTaskNo]);
+
+  /** 刷新：重新拉版本列表并切到最新已完成版本（生成完成弹框确认后调用） */
+  const reload = useCallback(() => {
+    if (!checkTaskNo) return;
+    setCompletedVersion(null);
+    setFailedVersion(null);
+    reportApi.instanceVersions(checkTaskNo)
+      .then(res => {
+        const list = res.data ?? [];
+        setVersions(list);
+        const latestDone = list.find(v => v.status === '888');
+        if (latestDone) setCurrentReportNo(latestDone.reportNo);
+      })
+      .catch(() => { /* 忽略 */ });
+  }, [checkTaskNo]);
+
+  /** 关闭"生成失败"提示 */
+  const clearFailed = useCallback(() => setFailedVersion(null), []);
 
   const currentVersion = versions.find(v => v.reportNo === currentReportNo)?.version;
 
@@ -264,5 +343,12 @@ export function useReportInstanceApi(checkTaskNo: string | undefined) {
     currentReportNo,
     currentVersion,
     selectVersion,
+    runningVersion,
+    renewing,
+    renew,
+    reload,
+    completedVersion,
+    failedVersion,
+    clearFailed,
   };
 }
