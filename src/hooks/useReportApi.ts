@@ -25,6 +25,13 @@ export interface AIRiskItem {
   sectionId: string;
   keywords: string[];
   status: AIRiskStatus;
+  /**
+   * 规则类内容块编号（硬关联键）
+   * <p>一条 analysisType=RULE 的内容块 ↔ 一条风险（1:1）。正文渲染时该块的
+   * DOM id 即 anchorCode=blockCode，故用它可直接命中整个规则块；
+   * 只有取不到时（如历史数据缺字段）才退化为 keywords 文本匹配。</p>
+   */
+  blockCode?: string;
   /** 段落原始文本（编辑模式恢复用） */
   bodyText?: string;
   /** 段落原始 HTML（编辑模式恢复用） */

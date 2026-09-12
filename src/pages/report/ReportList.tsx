@@ -20,6 +20,9 @@ const STATUS_MAP: Record<string, { color: string; label: string }> = {
   "999": { color: "error", label: "失败" },
 };
 
+/** 文本列空值兜底：null / undefined / 空串 → "-" */
+const dash = (v?: string | null) => (v === null || v === undefined || v === "" ? "-" : v);
+
 export default function ReportList() {
   const [data, setData] = useState<ReportInstanceSummary[]>([]);
   const [loading, setLoading] = useState(false);
@@ -61,10 +64,11 @@ export default function ReportList() {
   };
 
   const columns = [
-    { title: "日检流水号", dataIndex: "checkTaskNo", width: 180 },
-    { title: "企业名称", dataIndex: "customerName", width: 220 },
-    { title: "报告编号", dataIndex: "reportNo", width: 190 },
-    { title: "报告标题", dataIndex: "reportTitle" },
+    { title: "日检流水号", dataIndex: "checkTaskNo", width: 180, render: dash },
+    { title: "客户编号", dataIndex: "customerId", width: 120, render: dash },
+    { title: "客户名称", dataIndex: "customerName", width: 220, render: dash },
+    { title: "报告编号", dataIndex: "reportNo", width: 190, render: dash },
+    { title: "报告标题", dataIndex: "reportTitle", render: dash },
     {
       title: "状态",
       dataIndex: "status",
@@ -84,11 +88,18 @@ export default function ReportList() {
       },
     },
     {
+      title: "创建时间",
+      dataIndex: "createdAt",
+      width: 175,
+      render: (t: string) => (t ? new Date(t).toLocaleString("zh-CN") : "-"),
+    },
+    {
       title: "生成时间",
       dataIndex: "updatedAt",
       width: 175,
       render: (t: string) => (t ? new Date(t).toLocaleString("zh-CN") : "-"),
     },
+    { title: "用户账号", dataIndex: "userNo", width: 120, render: dash },
     {
       title: "操作",
       width: 200,
@@ -131,7 +142,7 @@ export default function ReportList() {
         dataSource={data}
         rowKey="reportNo"
         loading={loading}
-        scroll={{ x: 1280 }}
+        scroll={{ x: 1600 }}
       />
     </div>
   );
