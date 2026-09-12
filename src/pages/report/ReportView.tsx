@@ -342,13 +342,11 @@ tr:last-child td { border-bottom: 0; }
 @keyframes reportStateSpin { to { transform: rotate(360deg); } }
 .report-state-text { margin-top: 20px; font-size: 15px; font-weight: 800; letter-spacing: .6px; color: var(--text); }
 .report-state-hint { margin-top: 7px; font-size: 12.5px; color: var(--muted); }
-/* 免责声明：正文最前面的合规提示。用「风险提示」惯用的暖琥珀色系 + 实底标签 + 加粗文案，
-   保证一眼可见（用户反馈"不够显眼"）；与规则块（淡蓝）明确区分，实底标签也不会被误读为普通正文。 */
-.report-disclaimer { display: flex; gap: 14px; align-items: flex-start; padding: 15px 20px 16px 18px; border: 1px solid rgba(217,139,10,.36); border-left: 5px solid #d98b0a; border-radius: 12px; background: linear-gradient(180deg, #fffaf0, #fff2da); box-shadow: 0 6px 18px rgba(217,139,10,.10); }
-.report-disclaimer-icon { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; margin-top: 1px; border-radius: 10px; font-size: 16px; color: #fff; background: linear-gradient(135deg, #f0a52a, #d98b0a); box-shadow: 0 4px 12px rgba(217,139,10,.30); }
-.report-disclaimer-body { flex: 1; min-width: 0; }
-.report-disclaimer-tag { display: inline-block; padding: 2px 11px; border-radius: 999px; font-size: 12px; font-weight: 800; letter-spacing: .8px; color: #fff; background: linear-gradient(135deg, #f0a52a, #d98b0a); }
-.report-disclaimer-text { margin: 8px 0 0; font-size: 14px; font-weight: 700; line-height: 1.95; color: #6b4306; text-align: justify; }
+/* 合规提示条：正文最前面的固定文案。用「风险提示」惯用的暖琥珀色系 + 放大的实底图标 + 加粗文案，
+   保证一眼可见；**不出现「免责声明」四个字**（客户要求），语义靠盾形图标 + 文案本身承载。 */
+.report-disclaimer { display: flex; gap: 15px; align-items: center; padding: 15px 20px 15px 18px; border: 1px solid rgba(217,139,10,.36); border-left: 5px solid #d98b0a; border-radius: 12px; background: linear-gradient(180deg, #fffaf0, #fff2da); box-shadow: 0 6px 18px rgba(217,139,10,.10); }
+.report-disclaimer-icon { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 12px; font-size: 19px; color: #fff; background: linear-gradient(135deg, #f0a52a, #d98b0a); box-shadow: 0 5px 14px rgba(217,139,10,.32); }
+.report-disclaimer-text { flex: 1; min-width: 0; margin: 0; font-size: 14.5px; font-weight: 700; line-height: 1.95; color: #6b4306; text-align: justify; }
 /* 三栏（目录 260 + 正文 + 侧栏 600）需要相当宽的视口；且本页外层还有 MainLayout 的 Sider，
    实际可用宽度 ≈ 窗口 - 232，所以断点要比直觉更靠右，否则正文会被压到 2~300px。
    故断点 1180 → 1300 → 1500 */
@@ -549,11 +547,10 @@ function downloadWord(filename: string, title: string, bodyHtml: string) {
     .ai-risk-paragraph::before{content:none}
     .ai-risk-edit-actions{display:none!important}
     .rpt-history-btn{display:none!important}
-    /* 免责声明：Word 不认 flex/渐变，拉平为普通带框段落，隐藏图标（svg 渲染不可控）；文案保持加粗 */
+    /* 合规提示条：Word 不认 flex/渐变，拉平为普通带框段落，隐藏图标（svg 渲染不可控）；文案保持加粗 */
     .report-disclaimer{display:block!important;border:1px solid #d9a13a;border-left:4px solid #d98b0a;background:#fff6e6;padding:9pt 11pt;margin:0 0 10pt}
     .report-disclaimer-icon{display:none!important}
-    .report-disclaimer-tag{font-weight:bold;color:#8a5a08}
-    .report-disclaimer-text{margin:5pt 0 0;font-size:11pt;font-weight:bold;line-height:1.7;color:#6b4306}
+    .report-disclaimer-text{margin:0;font-size:11pt;font-weight:bold;line-height:1.7;color:#6b4306}
   </style></head><body><h1>${escapeHtml(title)}</h1>${bodyHtml}</body></html>`;
   const blob = new Blob([content], { type: 'application/msword;charset=utf-8' });
   const link = document.createElement('a');
@@ -1327,15 +1324,13 @@ export default function ReportView() {
           )}
 
           <section className="report-sections" onClick={onSectionClick}>
-            {/* 免责声明：正文最前面的合规提示（固定文案，不来自模板内容块） */}
+            {/* 合规提示：正文最前面的固定文案（不来自模板内容块）。
+                按客户要求不出现「免责声明」字样 —— 显眼度改由 琥珀色块 + 实底图标 + 加粗文案 承担。 */}
             <div className="report-disclaimer">
               <span className="report-disclaimer-icon" aria-hidden><SafetyCertificateOutlined /></span>
-              <div className="report-disclaimer-body">
-                <span className="report-disclaimer-tag">免责声明</span>
-                <p className="report-disclaimer-text">
-                  本报告由人工智能基于行内外授权数据及相关系统加工信息生成。内容仅供参考，用于辅助决策，不构成贷后检查的唯一或必须依据。依据金发[2026]8号文要求，最终决策以人工审批结果为准。
-                </p>
-              </div>
+              <p className="report-disclaimer-text">
+                本报告由人工智能基于行内外授权数据及相关系统加工信息生成。内容仅供参考，用于辅助决策，不构成贷后检查的唯一或必须依据。依据金发[2026]8号文要求，最终决策以人工审批结果为准。
+              </p>
             </div>
             {visibleSections.map(item => (
               <SectionCard key={item.id} item={item} />
