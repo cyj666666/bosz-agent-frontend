@@ -72,8 +72,8 @@ const REPORT_CSS = `
   overflow-x: hidden;
   padding: 16px 20px 24px;
 }
-/* 展开侧栏时第三列 390 → 520：AI风险识别表要放下「操作/规则名称/风险描述/状态」4 列 */
-.report-shell.with-side { grid-template-columns: 260px minmax(0, 1fr) 520px; }
+/* 展开侧栏时第三列 390 → 600：AI风险识别表要放下「操作/序号/规则名称/风险描述/对应章节/状态」6 列 */
+.report-shell.with-side { grid-template-columns: 260px minmax(0, 1fr) 600px; }
 .panel { border-radius: 24px; border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
 .report-nav {
   position: sticky;
@@ -182,6 +182,10 @@ tr:last-child td { border-bottom: 0; }
 .ai-risk-table table { min-width: 0; }
 .ai-risk-table th, .ai-risk-table td { padding: 8px; font-size: 13px; }
 .ai-risk-op { white-space: normal; }
+/* 操作列两个按钮改为竖排：横排会把该列撑到 108px，挤压右侧「风险描述」；
+   竖排后列宽可收到 66px，省下的宽度全部给风险描述 */
+.ai-risk-op-btns { display: flex; flex-direction: column; gap: 5px; }
+.ai-risk-op-btns .ai-risk-mini-btn { width: 100%; margin: 0; }
 .ai-risk-row { cursor: pointer; transition: background .18s ease; }
 .ai-risk-row:hover { background: rgba(227,239,255,.45); }
 .ai-risk-row.adopted { background: rgba(236,253,245,.86); }
@@ -215,8 +219,10 @@ tr:last-child td { border-bottom: 0; }
   30% { box-shadow: 0 0 0 7px rgba(240,160,32,.26); }
   60% { box-shadow: 0 0 0 12px rgba(240,160,32,.10); }
 }
-/* 可编辑提示：悬停时右上角出现"点击可编辑"角标，编辑中隐藏 */
-.ai-risk-paragraph::after { content: "点击可编辑"; position: absolute; top: 8px; right: 10px; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: .3px; color: var(--accent); background: rgba(22,100,255,.10); opacity: 0; transition: opacity .18s ease; pointer-events: none; }
+/* 角标（点击可编辑 / 当前定位）统一贴在「块体上边框之上」：
+   top:-10px 让角标跨在上边框上——上半截落在块的 16px 上外边距里，下半截落在块的 10px 内边距里，
+   两者都不含正文文字，因此长文本首行不会再从角标下面穿过（老写法 top:8px 会压住文字）。 */
+.ai-risk-paragraph::after { content: "点击可编辑"; position: absolute; top: -11px; right: 10px; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: .3px; line-height: 1.5; color: var(--accent); background: #eef4ff; border: 1px solid rgba(22,100,255,.20); opacity: 0; transition: opacity .18s ease; pointer-events: none; z-index: 1; }
 .ai-risk-paragraph:hover::after { opacity: 1; }
 .ai-risk-paragraph.editing::after { display: none; }
 /* ---- 「当前定位」：点击侧栏某行后，正文对应块进入常驻强调态 ----
@@ -229,7 +235,7 @@ tr:last-child td { border-bottom: 0; }
   animation: aiRiskLocatedIn .45s cubic-bezier(.22,1,.36,1);
 }
 .ai-risk-paragraph.ai-risk-located::before { background: linear-gradient(135deg, #f5a623, #e07c00); }
-.ai-risk-paragraph.ai-risk-located::after { content: "当前定位"; opacity: 1; color: #96560a; background: rgba(240,160,32,.22); font-weight: 800; }
+.ai-risk-paragraph.ai-risk-located::after { content: "当前定位"; opacity: 1; color: #96560a; background: linear-gradient(135deg, #ffe9b8, #fdd98a); border-color: rgba(224,124,0,.34); font-weight: 800; }
 /* 编辑态下让位给编辑框，不显示「当前定位」角标 */
 .ai-risk-paragraph.ai-risk-located.editing::after { display: none; }
 @keyframes aiRiskLocatedIn { from { transform: scale(.985); } to { transform: scale(1); } }
@@ -271,8 +277,10 @@ tr:last-child td { border-bottom: 0; }
 .side-panel:not(.expanded) .ai-full-conclusion-box { padding: 12px 14px; margin-top: 14px; }
 .side-panel:not(.expanded) .ai-full-report-footer { flex-direction: column; gap: 4px; margin-top: 16px; padding-top: 10px; }
 .report-loading { display: flex; align-items: center; justify-content: center; min-height: 360px; }
-/* 三栏（260 + 正文 + 520）需要更宽的视口才不挤压正文，故断点 1180 → 1300 */
-@media (max-width: 1300px) {
+/* 三栏（目录 260 + 正文 + 侧栏 600）需要相当宽的视口；且本页外层还有 MainLayout 的 Sider，
+   实际可用宽度 ≈ 窗口 - 232，所以断点要比直觉更靠右，否则正文会被压到 2~300px。
+   故断点 1180 → 1300 → 1500 */
+@media (max-width: 1500px) {
   .report-shell, .report-shell.with-side { grid-template-columns: 1fr; }
   .report-nav, .side-panel { position: relative; top: 0; height: auto; }
   .side-panel.collapsed { transform: none; opacity: 1; pointer-events: auto; }
@@ -365,10 +373,12 @@ function aiRiskTableHTML(list: AIRiskItem[], activeId: number | null = null): st
       <table>
         <thead>
           <tr>
-            <th class="ai-risk-op" style="width:108px">操作</th>
-            <th style="width:100px">规则名称</th>
+            <th class="ai-risk-op" style="width:66px">操作</th>
+            <th style="width:42px;text-align:center">序号</th>
+            <th style="width:88px">规则名称</th>
             <th>风险描述</th>
-            <th style="width:76px">状态</th>
+            <th style="width:80px">对应章节</th>
+            <th style="width:68px">状态</th>
           </tr>
         </thead>
         <tbody>
@@ -377,11 +387,15 @@ function aiRiskTableHTML(list: AIRiskItem[], activeId: number | null = null): st
               item => `
             <tr class="ai-risk-row ${item.status}${item.id === activeId ? ' active' : ''}" data-ai-risk-row="${item.id}">
               <td class="ai-risk-op">
-                <button class="ai-risk-mini-btn ai-risk-adopt-btn" data-ai-risk-action="adopt" data-ai-risk-id="${item.id}" type="button">采纳</button>
-                <button class="ai-risk-mini-btn ai-risk-invalid-btn" data-ai-risk-action="invalid" data-ai-risk-id="${item.id}" type="button">无效</button>
+                <div class="ai-risk-op-btns">
+                  <button class="ai-risk-mini-btn ai-risk-adopt-btn" data-ai-risk-action="adopt" data-ai-risk-id="${item.id}" type="button">采纳</button>
+                  <button class="ai-risk-mini-btn ai-risk-invalid-btn" data-ai-risk-action="invalid" data-ai-risk-id="${item.id}" type="button">无效</button>
+                </div>
               </td>
+              <td style="text-align:center;font-weight:800">${item.id}</td>
               <td><strong>${escapeHtml(item.ruleName)}</strong></td>
               <td class="risk-desc">${escapeHtml(item.riskDesc)}</td>
+              <td>${escapeHtml(item.chapter)}</td>
               <td>${statusBadge(item.status)}</td>
             </tr>`,
             )
