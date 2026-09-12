@@ -10,7 +10,7 @@
  * - 3 种面板：AI 风险识别 / 章节溯源 / AI 分析全文
  * - 滚动联动目录 / 回到顶部 / Word 下载 / 关键字过滤
  */
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback, memo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Spin, Select, Modal } from 'antd';
 import { useReportInstanceApi } from '../../hooks/useReportInstanceApi';
@@ -69,7 +69,8 @@ const REPORT_CSS = `
   overflow-x: hidden;
   padding: 16px 20px 24px;
 }
-.report-shell.with-side { grid-template-columns: 260px minmax(0, 1fr) 390px; }
+/* 展开侧栏时第三列 390 → 520：AI风险识别表要放下「操作/规则名称/风险描述/状态」4 列 */
+.report-shell.with-side { grid-template-columns: 260px minmax(0, 1fr) 520px; }
 .panel { border-radius: 24px; border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
 .report-nav {
   position: sticky;
@@ -170,9 +171,10 @@ tr:last-child td { border-bottom: 0; }
 /* AI 风险工具条（标题 + 说明 + 统计）：吸附在内容区顶部，随滚动固定 */
 .ai-risk-toolbar { position: sticky; top: 0; z-index: 4; display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; padding: 12px; border: 1px solid rgba(22,100,255,.12); border-radius: 16px; background: #f7faff; box-shadow: 0 6px 16px rgba(35,88,176,.06); }
 .ai-risk-summary { color: var(--muted); font-size: 13px; line-height: 1.7; }
-.ai-risk-table table { min-width: 1180px; }
-.ai-risk-op { position: sticky; left: 0; z-index: 2; background: inherit; min-width: 116px; }
-.ai-risk-table th.ai-risk-op { z-index: 4; background: rgba(237,244,255,.96); }
+/* 侧栏内 4 列表格自适应宽度（原为 6 列 + min-width:1180px，在窄侧栏里只能看到 sticky 的「操作」列） */
+.ai-risk-table table { min-width: 0; }
+.ai-risk-table th, .ai-risk-table td { padding: 8px; font-size: 13px; }
+.ai-risk-op { white-space: normal; }
 .ai-risk-row { cursor: pointer; transition: background .18s ease; }
 .ai-risk-row:hover { background: rgba(227,239,255,.45); }
 .ai-risk-row.adopted { background: rgba(236,253,245,.86); }
@@ -228,8 +230,23 @@ tr:last-child td { border-bottom: 0; }
 .ai-full-conclusion-box p { margin-bottom: 6px; font-size: 15px; line-height: 1.9; color: #0b2b44; }
 .ai-full-highlight { font-weight: 800; color: #004b7a; }
 .ai-full-report-footer { margin-top: 24px; padding-top: 14px; border-top: 1px solid #e6edf4; font-size: 13px; color: #6b7f93; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+/* 「AI分析全文」默认开在窄侧栏里：收紧卡片内边距与字号，避免 30/34px 内边距把 390px 挤爆；
+   expanded 全屏浮层保持原样（用 :not(.expanded) 限定） */
+.side-panel:not(.expanded) .ai-full-report-wrap { padding: 0; }
+.side-panel:not(.expanded) .ai-full-report-card { padding: 16px 14px; border-radius: 16px; }
+.side-panel:not(.expanded) .ai-full-report-header { flex-direction: column; align-items: flex-start; gap: 8px; margin-bottom: 14px; padding-bottom: 10px; }
+.side-panel:not(.expanded) .ai-full-report-header h1 { font-size: 16px; letter-spacing: 0; flex-wrap: wrap; gap: 6px; }
+.side-panel:not(.expanded) .ai-full-title { font-size: 15px; padding-left: 10px; border-left-width: 4px; margin-bottom: 12px; }
+.side-panel:not(.expanded) .ai-full-content p,
+.side-panel:not(.expanded) .ai-full-sub-item,
+.side-panel:not(.expanded) .ai-full-conclusion-box p { font-size: 13.5px; line-height: 1.8; margin-bottom: 10px; }
+.side-panel:not(.expanded) .ai-full-section-head { font-size: 14.5px; margin-top: 16px; margin-bottom: 8px; }
+.side-panel:not(.expanded) .ai-full-sub-item { padding-left: 14px; }
+.side-panel:not(.expanded) .ai-full-conclusion-box { padding: 12px 14px; margin-top: 14px; }
+.side-panel:not(.expanded) .ai-full-report-footer { flex-direction: column; gap: 4px; margin-top: 16px; padding-top: 10px; }
 .report-loading { display: flex; align-items: center; justify-content: center; min-height: 360px; }
-@media (max-width: 1180px) {
+/* 三栏（260 + 正文 + 520）需要更宽的视口才不挤压正文，故断点 1180 → 1300 */
+@media (max-width: 1300px) {
   .report-shell, .report-shell.with-side { grid-template-columns: 1fr; }
   .report-nav, .side-panel { position: relative; top: 0; height: auto; }
   .side-panel.collapsed { transform: none; opacity: 1; pointer-events: auto; }
@@ -316,12 +333,10 @@ function aiRiskTableHTML(list: AIRiskItem[]): string {
       <table>
         <thead>
           <tr>
-            <th class="ai-risk-op">操作</th>
-            <th style="width:58px;text-align:center">序号</th>
-            <th style="width:180px">规则名称</th>
+            <th class="ai-risk-op" style="width:108px">操作</th>
+            <th style="width:100px">规则名称</th>
             <th>风险描述</th>
-            <th style="width:110px">对应章节</th>
-            <th style="width:80px">状态</th>
+            <th style="width:76px">状态</th>
           </tr>
         </thead>
         <tbody>
@@ -333,10 +348,8 @@ function aiRiskTableHTML(list: AIRiskItem[]): string {
                 <button class="ai-risk-mini-btn ai-risk-adopt-btn" data-ai-risk-action="adopt" data-ai-risk-id="${item.id}" type="button">采纳</button>
                 <button class="ai-risk-mini-btn ai-risk-invalid-btn" data-ai-risk-action="invalid" data-ai-risk-id="${item.id}" type="button">无效</button>
               </td>
-              <td style="text-align:center;font-weight:800">${item.id}</td>
               <td><strong>${escapeHtml(item.ruleName)}</strong></td>
               <td class="risk-desc">${escapeHtml(item.riskDesc)}</td>
-              <td>${escapeHtml(item.chapter)}</td>
               <td>${statusBadge(item.status)}</td>
             </tr>`,
             )
@@ -372,6 +385,26 @@ function downloadWord(filename: string, title: string, bodyHtml: string) {
   link.click();
   URL.revokeObjectURL(link.href);
 }
+
+/* =============================================================================
+ * 章节卡片（memo 化）
+ * ---------------------------------------------------------------------------
+ * ⚠️ 必须 memo：正文是通过 dangerouslySetInnerHTML 注入的，而「AI风险」标识 /
+ * 采纳·无效状态 / 就地编辑态都是**渲染后按 blockCode 打在真实 DOM 上的**。
+ * 若父组件每次状态变化（目录高亮 activeSectionKey、回到顶部 showBackToTop、
+ * toast、侧栏开关、版本轮询等）都让本卡片重渲染，React 会重写 section-body 的
+ * innerHTML，把这些标记整块冲掉 —— 这正是「正文规则块看不到 AI风险标识、
+ * 点不动、编辑不了」的根因。
+ * ========================================================================== */
+const SectionCard = memo(function SectionCard({ item }: { item: SectionItem }) {
+  return (
+    <article id={item.id} className="section-card" data-module-id={item.id}>
+      <h3>{item.title}</h3>
+      {/* 溯源按钮不再单独渲染：它本身就是内容块（SOURCE_LINK），已在正文中渲染为外链按钮 */}
+      <div className="section-body" dangerouslySetInnerHTML={{ __html: item.contentHtml }} />
+    </article>
+  );
+});
 
 /* =============================================================================
  * 主组件
@@ -475,6 +508,10 @@ export default function ReportView() {
 
   /* ---- AI 风险正文定位绑定（按 blockCode 命中整个规则类内容块） ---- */
   useEffect(() => {
+    // ⚠️ 必须等 loading 结束再绑定：loading 期间组件提前 return 加载态，章节还没挂到 DOM 上，
+    // 此时绑定什么也命中不了；而 loading 结束后 aiRiskList / visibleSections 的引用不再变化，
+    // 若依赖里不带 loading，本 effect 就不会重跑 → 正文规则块上永远不会出现「AI风险」标识与编辑入口。
+    if (loading) return;
     aiRiskList.forEach(item => {
       const target = resolveRiskTarget(item);
       if (!target) return;
@@ -491,7 +528,7 @@ export default function ReportView() {
       if (item.status === 'adopted') target.classList.add('adopted');
       if (item.status === 'invalid') target.classList.add('invalid');
     });
-  }, [aiRiskList, visibleSections]);
+  }, [aiRiskList, visibleSections, loading]);
 
   /* ---- Toast ---- */
   const showToast = useCallback((message: string) => {
@@ -674,15 +711,14 @@ export default function ReportView() {
     setSidePanelContent(content);
   }, []);
 
-  const showAIRiskPanel = useCallback(
-    (fullscreen = true) => {
-      openSidePanel(fullscreen ? 'expanded' : 'normal', { type: 'aiRisk' });
-    },
-    [openSidePanel],
-  );
+  /* 顶栏两个入口默认都打开「侧边栏」（normal 嵌入第三列），不再直接铺成大浮层；
+     需要全屏时点侧栏标题栏的 ⤢ 展开即可。 */
+  const showAIRiskPanel = useCallback(() => {
+    openSidePanel('normal', { type: 'aiRisk' });
+  }, [openSidePanel]);
 
   const showAIFullAnalysis = useCallback(() => {
-    openSidePanel('expanded', { type: 'aiFull' });
+    openSidePanel('normal', { type: 'aiFull' });
   }, [openSidePanel]);
 
   const showProvenance = useCallback(
@@ -944,7 +980,7 @@ export default function ReportView() {
               >
                 {renewing ? '提交中…' : '更新报告'}
               </button>
-              <button className="ghost-btn ai-risk-btn" type="button" onClick={() => showAIRiskPanel(true)}>
+              <button className="ghost-btn ai-risk-btn" type="button" onClick={showAIRiskPanel}>
                 AI风险识别
               </button>
               <button className="ghost-btn" type="button" onClick={showAIFullAnalysis}>
@@ -968,11 +1004,7 @@ export default function ReportView() {
 
           <section className="report-sections" onClick={onSectionClick}>
             {visibleSections.map(item => (
-              <article key={item.id} id={item.id} className="section-card" data-module-id={item.id}>
-                <h3>{item.title}</h3>
-                {/* 溯源按钮不再单独渲染：它本身就是内容块（SOURCE_LINK），已在正文中渲染为外链按钮 */}
-                <div className="section-body" dangerouslySetInnerHTML={{ __html: item.contentHtml }} />
-              </article>
+              <SectionCard key={item.id} item={item} />
             ))}
           </section>
         </main>
