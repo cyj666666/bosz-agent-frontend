@@ -13,6 +13,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback, memo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Spin, Select, Modal } from 'antd';
+import { CopyOutlined, CheckOutlined } from '@ant-design/icons';
 import { useReportInstanceApi } from '../../hooks/useReportInstanceApi';
 import { reportApi } from '../../api/report';
 import {
@@ -23,6 +24,8 @@ import {
 } from '../../hooks/useReportApi';
 
 type SidePanelMode = 'normal' | 'expanded' | 'collapsed';
+/** 轻提示语义：成功 / 中性说明 / 失败 */
+type ToastType = 'success' | 'info' | 'error';
 type SidePanelContent =
   | { type: 'aiRisk' }
   | { type: 'aiFull' }
@@ -95,6 +98,10 @@ const REPORT_CSS = `
 .report-topbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 16px; padding: 18px 22px; flex-wrap: wrap; }
 .report-company-title { margin: 0; font-size: clamp(1.45rem, 2.6vw, 2.05rem); line-height: 1.12; color: var(--text); font-weight: 800; }
 .report-page-subtitle { margin: 8px 0 0; color: var(--muted); font-size: 1rem; letter-spacing: .18em; }
+/* 复制报告编号：图标按钮（无文字），复制成功后短暂变绿并显示 ✓ */
+.copy-btn { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; flex: 0 0 auto; border-radius: 12px; border: 1px solid var(--line); background: #fff; color: var(--muted); cursor: pointer; padding: 0; font-size: 15px; transition: color .18s ease, border-color .18s ease, background .18s ease, transform .18s ease; }
+.copy-btn:hover { color: var(--accent); border-color: rgba(22,100,255,.34); transform: translateY(-1px); }
+.copy-btn.copied { color: #16a34a; border-color: rgba(22,163,74,.36); background: rgba(236,253,245,.92); }
 .sample-badge { margin: 10px 0 0; color: var(--muted); font-size: 13px; font-weight: 700; }
 .toolbar { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .primary-btn, .ghost-btn, .icon-btn { border: 0; border-radius: 14px; padding: 10px 14px; cursor: pointer; transition: transform .18s ease; font: inherit; color: var(--text); }
@@ -190,7 +197,8 @@ tr:last-child td { border-bottom: 0; }
 .ai-risk-badge.pending { color: #92400e; background: #fef3c7; }
 .ai-risk-badge.adopted { color: #065f46; background: #d1fae5; }
 .ai-risk-badge.invalid { color: #4b5563; background: #e5e7eb; }
-.ai-risk-paragraph { position: relative; border-radius: 14px; padding: 10px 12px; border: 1px solid rgba(22,100,255,.14); background: rgba(246,250,255,.72); cursor: pointer; transition: background .18s ease, border .18s ease, box-shadow .18s ease; }
+/* margin：与上下正文拉开空隙，避免规则块紧贴相邻段落显得拥挤（普通段落间距为 10px） */
+.ai-risk-paragraph { position: relative; margin: 16px 0; border-radius: 14px; padding: 10px 12px; border: 1px solid rgba(22,100,255,.14); background: rgba(246,250,255,.72); cursor: pointer; transition: background .18s ease, border .18s ease, box-shadow .18s ease; }
 .ai-risk-paragraph:hover { border-color: rgba(22,100,255,.35); box-shadow: 0 8px 22px rgba(22,100,255,.08); }
 .ai-risk-paragraph::before { content: "AI风险"; display: inline-block; margin-right: 8px; padding: 1px 7px; border-radius: 999px; color: #fff; background: linear-gradient(135deg, #6d5dfc, #1664ff); font-size: 12px; font-weight: 900; vertical-align: 1px; }
 .ai-risk-paragraph.adopted { background: rgba(236,253,245,.65); border-color: rgba(22,163,74,.26); }
@@ -203,17 +211,35 @@ tr:last-child td { border-bottom: 0; }
 .ai-risk-cancel { color: var(--text); background: #fff; border: 1px solid var(--line) !important; }
 .ai-risk-flash { animation: aiRiskFlash 1.4s ease; }
 @keyframes aiRiskFlash {
-  0%, 100% { box-shadow: 0 0 0 rgba(22,100,255,0); }
-  30% { box-shadow: 0 0 0 6px rgba(22,100,255,.18); }
-  60% { box-shadow: 0 0 0 9px rgba(22,100,255,.08); }
+  0%, 100% { box-shadow: 0 0 0 rgba(240,160,32,0); }
+  30% { box-shadow: 0 0 0 7px rgba(240,160,32,.26); }
+  60% { box-shadow: 0 0 0 12px rgba(240,160,32,.10); }
 }
 /* 可编辑提示：悬停时右上角出现"点击可编辑"角标，编辑中隐藏 */
 .ai-risk-paragraph::after { content: "点击可编辑"; position: absolute; top: 8px; right: 10px; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: .3px; color: var(--accent); background: rgba(22,100,255,.10); opacity: 0; transition: opacity .18s ease; pointer-events: none; }
 .ai-risk-paragraph:hover::after { opacity: 1; }
 .ai-risk-paragraph.editing::after { display: none; }
+/* ---- 「当前定位」：点击侧栏某行后，正文对应块进入常驻强调态 ----
+   三等视觉层级：普通正文(白底) < 普通规则块(淡蓝) < 当前定位块(琥珀+左色条+外圈+角标) */
+.ai-risk-paragraph.ai-risk-located {
+  background: linear-gradient(180deg, rgba(255,247,226,.98), rgba(255,252,241,.98));
+  border-color: #f0a020;
+  border-left: 5px solid #e07c00;
+  box-shadow: 0 0 0 3px rgba(240,160,32,.28), 0 16px 34px rgba(224,124,0,.18);
+  animation: aiRiskLocatedIn .45s cubic-bezier(.22,1,.36,1);
+}
+.ai-risk-paragraph.ai-risk-located::before { background: linear-gradient(135deg, #f5a623, #e07c00); }
+.ai-risk-paragraph.ai-risk-located::after { content: "当前定位"; opacity: 1; color: #96560a; background: rgba(240,160,32,.22); font-weight: 800; }
+/* 编辑态下让位给编辑框，不显示「当前定位」角标 */
+.ai-risk-paragraph.ai-risk-located.editing::after { display: none; }
+@keyframes aiRiskLocatedIn { from { transform: scale(.985); } to { transform: scale(1); } }
 /* 提示 toast：居中显示 + 卡片化样式 */
-.ai-risk-toast { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); display: inline-flex; align-items: center; gap: 12px; max-width: min(78vw, 460px); padding: 15px 24px; border-radius: 16px; color: #fff; font-size: 14px; font-weight: 600; letter-spacing: .3px; line-height: 1.6; background: linear-gradient(135deg, rgba(26,37,62,.97), rgba(13,21,38,.97)); box-shadow: 0 22px 52px rgba(10,22,45,.32); backdrop-filter: blur(6px); z-index: 2100; animation: reportToastIn .22s cubic-bezier(.22,1,.36,1); }
-.ai-risk-toast::before { content: ""; width: 9px; height: 9px; flex: 0 0 auto; border-radius: 50%; background: #5aa2ff; box-shadow: 0 0 0 4px rgba(90,162,255,.20); }
+/* 轻提示 toast：屏幕居中 + 暗色玻璃卡 + 语义图标（成功 ✓ / 中性 i / 失败 !） */
+.ai-risk-toast { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); display: inline-flex; align-items: center; gap: 12px; max-width: min(78vw, 460px); padding: 14px 22px 14px 16px; border-radius: 18px; border: 1px solid rgba(255,255,255,.12); color: #fff; font-size: 14px; font-weight: 600; letter-spacing: .2px; line-height: 1.6; background: linear-gradient(135deg, rgba(28,40,66,.96), rgba(13,21,38,.96)); box-shadow: 0 24px 56px rgba(10,22,45,.34); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); z-index: 2100; animation: reportToastIn .22s cubic-bezier(.22,1,.36,1); }
+.ai-risk-toast-icon { width: 22px; height: 22px; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 13px; font-weight: 900; font-style: normal; line-height: 1; color: #fff; }
+.ai-risk-toast.success .ai-risk-toast-icon { background: linear-gradient(135deg, #35bd85, #16915a); box-shadow: 0 0 0 4px rgba(53,189,133,.20); }
+.ai-risk-toast.info .ai-risk-toast-icon { background: linear-gradient(135deg, #93a6c2, #62748f); box-shadow: 0 0 0 4px rgba(147,166,194,.18); }
+.ai-risk-toast.error .ai-risk-toast-icon { background: linear-gradient(135deg, #f2817a, #d9453d); box-shadow: 0 0 0 4px rgba(217,69,61,.20); }
 @keyframes reportToastIn { from { opacity: 0; transform: translate(-50%, -46%) scale(.95); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
 .ai-full-report-wrap { min-height: 100%; padding: 8px; background: radial-gradient(circle at top left, rgba(84,160,255,.14), transparent 28%), linear-gradient(180deg, #f8fbff 0%, #eef5ff 100%); border-radius: 14px; }
 .ai-full-report-card { max-width: 1000px; margin: 0 auto; background: #ffffff; border-radius: 22px; box-shadow: 0 20px 56px rgba(35,88,176,.12); border: 1px solid rgba(31,90,181,.14); padding: 30px 34px; }
@@ -317,7 +343,13 @@ function textToHtml(value: string): string {
   return escapeHtml(value).replace(/\n/g, '<br/>');
 }
 
-function aiRiskTableHTML(list: AIRiskItem[]): string {
+/**
+ * AI 风险表格 HTML
+ * <p>行高亮（active）**由数据声明式生成**，不靠渲染后 toggle class ——
+ * 该区域是 dangerouslySetInnerHTML，任何一次重渲染（跳转时正文滚动会触发
+ * 目录高亮/回到顶部等 setState）都会重写 innerHTML，把命令式加的 class 冲掉。</p>
+ */
+function aiRiskTableHTML(list: AIRiskItem[], activeId: number | null = null): string {
   const adopted = list.filter(i => i.status === 'adopted').length;
   const invalid = list.filter(i => i.status === 'invalid').length;
   const pending = list.filter(i => i.status === 'pending').length;
@@ -343,8 +375,8 @@ function aiRiskTableHTML(list: AIRiskItem[]): string {
           ${list
             .map(
               item => `
-            <tr class="ai-risk-row ${item.status}" data-ai-risk-row="${item.id}">
-              <td class="ai-risk-op" data-stop="1">
+            <tr class="ai-risk-row ${item.status}${item.id === activeId ? ' active' : ''}" data-ai-risk-row="${item.id}">
+              <td class="ai-risk-op">
                 <button class="ai-risk-mini-btn ai-risk-adopt-btn" data-ai-risk-action="adopt" data-ai-risk-id="${item.id}" type="button">采纳</button>
                 <button class="ai-risk-mini-btn ai-risk-invalid-btn" data-ai-risk-action="invalid" data-ai-risk-id="${item.id}" type="button">无效</button>
               </td>
@@ -447,9 +479,13 @@ export default function ReportView() {
   const [sidePanelContent, setSidePanelContent] = useState<SidePanelContent>({ type: 'aiRisk' });
   const [editingAIRiskId, setEditingAIRiskId] = useState<number | null>(null);
   const [activeAIRiskId, setActiveAIRiskId] = useState<number | null>(null);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null);
   const [showBackToTop, setShowBackToTop] = useState(false);
   const toastTimerRef = useRef<number | null>(null);
+
+  /** 报告编号复制按钮的「已复制」瞬时反馈 */
+  const [copiedReportNo, setCopiedReportNo] = useState(false);
+  const copyTimerRef = useRef<number | null>(null);
 
   /** 更新报告的结果提示弹框（居中）：生成完成 / 生成失败 */
   const [resultModal, setResultModal] = useState<{ type: 'success' | 'failed'; failReason?: string } | null>(null);
@@ -530,11 +566,24 @@ export default function ReportView() {
     });
   }, [aiRiskList, visibleSections, loading]);
 
-  /* ---- Toast ---- */
-  const showToast = useCallback((message: string) => {
-    setToastMessage(message);
+  /* ---- 「当前定位」常驻高亮：与侧栏选中行（activeAIRiskId）双向联动 ----
+     点击侧栏某行 → 正文对应规则块加 .ai-risk-located（琥珀底 + 左色条 + 外圈 + “当前定位”角标），
+     与“普通正文 / 普通淡蓝规则块”拉开层级；点另一行会自动把上一个的定位态摘掉。 */
+  useEffect(() => {
+    if (loading) return;
+    document.querySelectorAll<HTMLElement>('.rpt-block.ai-risk-located')
+      .forEach(el => el.classList.remove('ai-risk-located'));
+    if (activeAIRiskId == null) return;
+    const item = aiRiskList.find(r => r.id === activeAIRiskId);
+    if (!item) return;
+    resolveRiskTarget(item)?.classList.add('ai-risk-located');
+  }, [activeAIRiskId, aiRiskList, loading]);
+
+  /* ---- Toast（message + 语义类型，决定图标与配色） ---- */
+  const showToast = useCallback((message: string, type: ToastType = 'info') => {
+    setToast({ message, type });
     if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
-    toastTimerRef.current = window.setTimeout(() => setToastMessage(null), 1600);
+    toastTimerRef.current = window.setTimeout(() => setToast(null), 1800);
   }, []);
 
   /* ---- AI 风险状态切换（采纳 / 无效）：乐观更新 + 落库 + 失败回滚 ---- */
@@ -572,13 +621,14 @@ export default function ReportView() {
           throw new Error('该风险缺少内容块编号，无法保存');
         }
         await reportApi.instanceRiskStatus(currentReportNo, item.blockCode, status.toUpperCase());
-        showToast(status === 'adopted'
-          ? '已采纳：正文保留并写入数据库'
-          : '已置为无效：正文整块隐藏并写入数据库');
+        showToast(
+          status === 'adopted' ? '已采纳' : '已标记为无效',
+          status === 'adopted' ? 'success' : 'info',
+        );
       } catch (e: any) {
         // ③ 失败回滚
         applyStatus(prevStatus);
-        showToast(e?.message || '状态保存失败，已回滚');
+        showToast(e?.message || '操作失败，请重试', 'error');
       }
     },
     [aiRiskList, editingAIRiskId, setAIRiskList, showToast, currentReportNo],
@@ -590,7 +640,7 @@ export default function ReportView() {
       const item = aiRiskList.find(r => r.id === id);
       if (!item) return;
       if (item.status === 'invalid') {
-        showToast('该风险已置为无效，正文段落已移除');
+        showToast('该风险已标记为无效，正文中不展示');
         return;
       }
       const body = resolveRiskTarget(item);
@@ -643,7 +693,7 @@ export default function ReportView() {
       if (!textarea) return;
       const value = textarea.value.trim();
       if (!value) {
-        showToast('正文内容不能为空');
+        showToast('正文内容不能为空', 'error');
         return;
       }
 
@@ -670,7 +720,7 @@ export default function ReportView() {
           throw new Error('该内容块缺少编号，无法保存');
         }
         await reportApi.instanceBlockContent(currentReportNo, item.blockCode, nextHtml);
-        showToast('正文已修改并保存');
+        showToast('正文已保存', 'success');
       } catch (e: any) {
         // ③ 失败回滚为编辑前的内容与状态
         item.bodyHtml = prevHtml;
@@ -681,7 +731,7 @@ export default function ReportView() {
         if (prevStatus === 'invalid') para.classList.add('invalid');
         para.innerHTML = prevHtml ?? '';
         setAIRiskList(prev => [...prev]);
-        showToast(e?.message || '正文保存失败，已回滚');
+        showToast(e?.message || '正文保存失败，已恢复为修改前内容', 'error');
       }
     },
     [aiRiskList, setAIRiskList, showToast, currentReportNo],
@@ -736,6 +786,34 @@ export default function ReportView() {
     setSidePanelMode(prev => (prev === 'expanded' ? 'normal' : 'expanded'));
   }, []);
 
+  /* ---- 顶栏：复制当前版本的报告编号（图标按钮，无文字；成功后图标短暂变 ✓） ---- */
+  const copyReportNo = useCallback(async () => {
+    const value = currentReportNo;
+    if (!value) return;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value);
+      } else {
+        // 兜底：非安全上下文（http 非 localhost）下 Clipboard API 不可用
+        const ta = document.createElement('textarea');
+        ta.value = value;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.top = '-1000px';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      setCopiedReportNo(true);
+      if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = window.setTimeout(() => setCopiedReportNo(false), 1400);
+    } catch {
+      showToast('复制失败，请手动选择复制', 'error');
+    }
+  }, [currentReportNo, showToast]);
+
   /* ---- 顶栏按钮：word 下载 ---- */
   const handleDownload = useCallback(() => {
     const bodyHtml = Array.from(document.querySelectorAll<HTMLElement>('.section-card'))
@@ -766,9 +844,9 @@ export default function ReportView() {
       onOk: async () => {
         try {
           await renew();
-          showToast('已提交，新报告生成中');
+          showToast('已提交，新报告生成中', 'success');
         } catch (e: any) {
-          showToast(e?.message || '更新报告失败');
+          showToast(e?.message || '更新报告失败', 'error');
         }
       },
     });
@@ -853,8 +931,9 @@ export default function ReportView() {
         setAIRiskStatus(id, action === 'adopt' ? 'adopted' : 'invalid');
         return;
       }
+      // 整行任意位置都可点击跳转（含「操作」列的空白区）；两个按钮已在上面的分支拦截
       const row = target.closest<HTMLElement>('[data-ai-risk-row]');
-      if (row && !target.closest('[data-stop]')) {
+      if (row) {
         const id = Number(row.getAttribute('data-ai-risk-row'));
         locateAIRisk(id, true);
       }
@@ -870,18 +949,11 @@ export default function ReportView() {
   }, [sidePanelContent]);
 
   const sidePanelBody = useMemo(() => {
-    if (sidePanelContent.type === 'aiRisk') return aiRiskTableHTML(aiRiskList);
+    // 行高亮随数据一起生成（activeAIRiskId 参与），避免被重渲染冲掉
+    if (sidePanelContent.type === 'aiRisk') return aiRiskTableHTML(aiRiskList, activeAIRiskId);
     if (sidePanelContent.type === 'aiFull') return aiFullAnalysisHtml;
     return sourcePanelHtml(sourceTemplates[sidePanelContent.moduleId] ?? []);
-  }, [sidePanelContent, aiRiskList, aiFullAnalysisHtml, sourceTemplates]);
-
-  /* ---- 行高亮（点击表格行后） ---- */
-  useEffect(() => {
-    document.querySelectorAll('.ai-risk-row').forEach(row => {
-      const id = Number(row.getAttribute('data-ai-risk-row'));
-      row.classList.toggle('active', id === activeAIRiskId);
-    });
-  }, [activeAIRiskId, aiRiskList, sidePanelContent]);
+  }, [sidePanelContent, aiRiskList, aiFullAnalysisHtml, sourceTemplates, activeAIRiskId]);
 
   /* ---- Loading ---- */
   if (loading) {
@@ -962,6 +1034,18 @@ export default function ReportView() {
                       disabled: v.status === '000',
                     }))}
                   />
+                )}
+                {/* 复制报告编号：图标按钮，不给文字；点一下复制当前版本的 reportNo */}
+                {!!currentReportNo && (
+                  <button
+                    className={`copy-btn ${copiedReportNo ? 'copied' : ''}`}
+                    type="button"
+                    title={copiedReportNo ? '已复制' : '复制报告编号'}
+                    aria-label="复制报告编号"
+                    onClick={copyReportNo}
+                  >
+                    {copiedReportNo ? <CheckOutlined /> : <CopyOutlined />}
+                  </button>
                 )}
               </div>
               <p className="report-page-subtitle">{reportMeta.subtitle}</p>
@@ -1072,10 +1156,13 @@ export default function ReportView() {
         </button>
       </div>
 
-      {/* Toast */}
-      {toastMessage && (
-        <div className="ai-risk-toast" role="status">
-          {toastMessage}
+      {/* Toast：语义图标（✓ 成功 / i 中性 / ! 失败） */}
+      {toast && (
+        <div className={`ai-risk-toast ${toast.type}`} role="status">
+          <span className="ai-risk-toast-icon" aria-hidden="true">
+            {toast.type === 'success' ? '✓' : toast.type === 'error' ? '!' : 'i'}
+          </span>
+          <span>{toast.message}</span>
         </div>
       )}
 
