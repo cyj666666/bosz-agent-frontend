@@ -699,7 +699,8 @@ export default function ReportView() {
           <div className="panel-head sticky-head">
             <h2>报告目录</h2>
           </div>
-          <div className="filter-box">
+          {/* "只看有溯源模块" 过滤：暂时隐藏（保留逻辑，后续需要时去掉 style 即可恢复） */}
+          <div className="filter-box" style={{ display: 'none' }}>
             <input
               id="toggle-dynamic-only"
               type="checkbox"
@@ -716,10 +717,7 @@ export default function ReportView() {
                 className={`nav-item ${activeSectionKey === item.id ? 'active' : ''}`}
                 onClick={() => setActiveSectionKey(item.id)}
               >
-                <strong>
-                  {item.title}
-                  {item.hasSourceLink ? ' ☑️' : ''}
-                </strong>
+                <strong>{item.title}</strong>
               </a>
             ))}
           </nav>
