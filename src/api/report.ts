@@ -93,6 +93,23 @@ export interface ReportInstanceRisk {
   jumpAnchorCode?: string;
   sortNo?: number;
   catalogCode?: string;
+  /** 该风险要点在当前日检流水号下的修改记录条数（跨版本累计）；>0 时前端显示「修改记录(N)」 */
+  editCount?: number;
+}
+
+/** 风险要点修改记录项（详情页「修改记录」弹窗数据源） */
+export interface ReportRiskEditLogItem {
+  /** 修改人姓名（取不到 real_name 时回落账号） */
+  operatorName?: string;
+  operatorNo?: string;
+  /** 修改时间 */
+  inputtime?: string;
+  /** 修改后文案 */
+  contentAfter?: string;
+  /** 修改前文案（审计对比用） */
+  contentBefore?: string;
+  /** 该次修改发生在哪一版报告上 */
+  reportNo?: string;
 }
 
 /** 报告详情（三栏渲染数据源） */
@@ -166,7 +183,13 @@ export const reportApi = {
   instanceRiskStatus: (reportNo: string, blockCode: string, status: string) =>
     expectOk(post<void>('/report/instance/risk/status', { reportNo, blockCode, status })),
 
-  /** 修改规则类正文内容（后端同事务同步风险列表文案，并把状态置为已采纳） */
+  /** 修改规则类正文内容（后端同事务同步风险列表文案 + 写入修改记录，并把状态置为已采纳） */
   instanceBlockContent: (reportNo: string, blockCode: string, content: string) =>
     expectOk(post<void>('/report/instance/block/content', { reportNo, blockCode, content })),
+
+  /** 查询某风险要点的修改记录（归档维度：同日检流水号 + 同风险要点；按修改时间倒序，最新在上） */
+  instanceBlockEditHistory: (checkTaskNo: string, blockCode: string) =>
+    expectOk(get<ReportRiskEditLogItem[]>(
+      `/report/instance/block/edit-history?checkTaskNo=${encodeURIComponent(checkTaskNo)}`
+      + `&blockCode=${encodeURIComponent(blockCode)}`)),
 };

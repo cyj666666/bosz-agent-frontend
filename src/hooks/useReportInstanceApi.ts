@@ -168,6 +168,8 @@ function applyDetail(
       id: index + 1,
       // 硬关联键：规则类内容块编号（正文块的 DOM id = anchorCode = blockCode）
       blockCode: risk.blockCode || undefined,
+      // 修改记录条数（同日检流水号下跨版本累计）；>0 时该行显示「修改记录(N)」按钮
+      editCount: risk.editCount ?? 0,
       ruleName: risk.ruleName ?? '',
       riskDesc: stripHtml(risk.riskDesc),
       // 后端已移除 AI 解读 / 行动建议字段，列表不再展示这两列

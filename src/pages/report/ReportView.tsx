@@ -15,7 +15,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Spin, Select, Modal } from 'antd';
 import { CopyOutlined, CheckOutlined } from '@ant-design/icons';
 import { useReportInstanceApi } from '../../hooks/useReportInstanceApi';
-import { reportApi } from '../../api/report';
+import { reportApi, type ReportRiskEditLogItem } from '../../api/report';
 import {
   type AIRiskItem,
   type AIRiskStatus,
@@ -186,6 +186,21 @@ tr:last-child td { border-bottom: 0; }
    竖排后列宽可收到 66px，省下的宽度全部给风险描述 */
 .ai-risk-op-btns { display: flex; flex-direction: column; gap: 5px; }
 .ai-risk-op-btns .ai-risk-mini-btn { width: 100%; margin: 0; }
+/* 「修改记录(N)」按钮：仅当该风险要点有历史修改时出现在「规则名称」下方 */
+.ai-risk-history-btn { display: block; margin-top: 5px; padding: 1px 7px; border-radius: 999px; border: 1px solid rgba(22,100,255,.24); background: rgba(22,100,255,.07); color: var(--accent); font-size: 11px; font-weight: 700; line-height: 1.7; cursor: pointer; white-space: nowrap; transition: background .18s ease, border-color .18s ease; }
+.ai-risk-history-btn:hover { background: rgba(22,100,255,.15); border-color: rgba(22,100,255,.42); }
+/* 修改记录弹窗（内容在 antd portal 里，:root 变量与类选择器同样生效） */
+.report-history-modal .ant-modal-title { font-size: 16px; font-weight: 800; }
+.history-list { margin: 0; padding: 0; list-style: none; max-height: 52vh; overflow: auto; }
+.history-list li { padding: 10px 2px; border-bottom: 1px dashed var(--line); font-size: 13.5px; line-height: 1.85; color: var(--text); word-break: break-word; }
+.history-list li:last-child { border-bottom: 0; }
+.history-seq { font-weight: 800; color: var(--accent); }
+.history-who { font-weight: 700; }
+.history-time { margin-left: 10px; color: var(--muted); font-size: 12.5px; }
+.history-action { margin-left: 6px; color: var(--muted); }
+.history-text { white-space: pre-wrap; }
+.history-status { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 22px 0; color: var(--muted); font-size: 14px; }
+.history-status.is-error { color: #c0392b; }
 .ai-risk-row { cursor: pointer; transition: background .18s ease; }
 .ai-risk-row:hover { background: rgba(227,239,255,.45); }
 .ai-risk-row.adopted { background: rgba(236,253,245,.86); }
@@ -352,6 +367,32 @@ function textToHtml(value: string): string {
 }
 
 /**
+ * 修改记录里的 contentAfter/contentBefore 存的是正文 HTML 片段（转义 + <br/>），
+ * 弹窗里要按纯文本展示，故去掉标签并把常见实体还原回字符。
+ */
+function editLogPlainText(html: string | undefined): string {
+  return String(html ?? '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&')
+    .trim();
+}
+
+/** 修改时间展示：yyyy-MM-dd HH:mm */
+function fmtDateTime(value?: string): string {
+  if (!value) return '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/**
  * AI 风险表格 HTML
  * <p>行高亮（active）**由数据声明式生成**，不靠渲染后 toggle class ——
  * 该区域是 dangerouslySetInnerHTML，任何一次重渲染（跳转时正文滚动会触发
@@ -393,7 +434,12 @@ function aiRiskTableHTML(list: AIRiskItem[], activeId: number | null = null): st
                 </div>
               </td>
               <td style="text-align:center;font-weight:800">${item.id}</td>
-              <td><strong>${escapeHtml(item.ruleName)}</strong></td>
+              <td>
+                <strong>${escapeHtml(item.ruleName)}</strong>
+                ${(item.editCount ?? 0) > 0
+                  ? `<button class="ai-risk-history-btn" data-ai-risk-history="${item.id}" type="button">修改记录(${item.editCount})</button>`
+                  : ''}
+              </td>
               <td class="risk-desc">${escapeHtml(item.riskDesc)}</td>
               <td>${escapeHtml(item.chapter)}</td>
               <td>${statusBadge(item.status)}</td>
@@ -500,6 +546,14 @@ export default function ReportView() {
   /** 报告编号复制按钮的「已复制」瞬时反馈 */
   const [copiedReportNo, setCopiedReportNo] = useState(false);
   const copyTimerRef = useRef<number | null>(null);
+
+  /** 「修改记录」弹窗状态（null = 关闭；懒加载，点开才请求） */
+  const [editHistory, setEditHistory] = useState<{
+    ruleName: string;
+    loading: boolean;
+    list: ReportRiskEditLogItem[];
+    error?: string;
+  } | null>(null);
 
   /** 更新报告的结果提示弹框（居中）：生成完成 / 生成失败 */
   const [resultModal, setResultModal] = useState<{ type: 'success' | 'failed'; failReason?: string } | null>(null);
@@ -646,6 +700,25 @@ export default function ReportView() {
       }
     },
     [aiRiskList, editingAIRiskId, setAIRiskList, showToast, currentReportNo],
+  );
+
+  /* ---- 「修改记录」弹窗：点击行内按钮才拉取（）
+     归档维度是「同日检流水号 + 同风险要点」，故用 checkTaskNo + blockCode 查询，
+     同一日检流水号下各版本的修改历史都会返回（跨版本可追溯）。 ---- */
+  const openEditHistory = useCallback(
+    async (id: number) => {
+      const item = aiRiskList.find(r => r.id === id);
+      if (!item?.blockCode || !checkTaskNo) return;
+      const ruleName = item.ruleName;
+      setEditHistory({ ruleName, loading: true, list: [] });
+      try {
+        const res = await reportApi.instanceBlockEditHistory(checkTaskNo, item.blockCode);
+        setEditHistory({ ruleName, loading: false, list: res.data ?? [] });
+      } catch (e: any) {
+        setEditHistory({ ruleName, loading: false, list: [], error: e?.message || '修改记录加载失败' });
+      }
+    },
+    [aiRiskList, checkTaskNo],
   );
 
   /* ---- 表格行点击：定位到正文 ---- */
@@ -945,6 +1018,13 @@ export default function ReportView() {
         setAIRiskStatus(id, action === 'adopt' ? 'adopted' : 'invalid');
         return;
       }
+      // 「修改记录(N)」按钮：打开历史弹窗，不触发行跳转
+      const historyBtn = target.closest<HTMLElement>('[data-ai-risk-history]');
+      if (historyBtn) {
+        event.stopPropagation();
+        openEditHistory(Number(historyBtn.getAttribute('data-ai-risk-history')));
+        return;
+      }
       // 整行任意位置都可点击跳转（含「操作」列的空白区）；两个按钮已在上面的分支拦截
       const row = target.closest<HTMLElement>('[data-ai-risk-row]');
       if (row) {
@@ -952,7 +1032,7 @@ export default function ReportView() {
         locateAIRisk(id, true);
       }
     },
-    [setAIRiskStatus, locateAIRisk],
+    [setAIRiskStatus, locateAIRisk, openEditHistory],
   );
 
   /* ---- 侧栏标题与内容 ---- */
@@ -1211,6 +1291,37 @@ export default function ReportView() {
               </button>
             </div>
           </div>
+        )}
+      </Modal>
+
+      {/* 修改记录弹窗：归档维度 = 同日检流水号 + 同风险要点（跨版本累计，最新在上） */}
+      <Modal
+        open={!!editHistory}
+        centered
+        width={640}
+        footer={null}
+        onCancel={() => setEditHistory(null)}
+        className="report-history-modal"
+        title={editHistory ? `修改记录 · ${editHistory.ruleName}` : '修改记录'}
+      >
+        {editHistory?.loading ? (
+          <div className="history-status"><Spin size="small" /><span>加载中…</span></div>
+        ) : editHistory?.error ? (
+          <div className="history-status is-error">{editHistory.error}</div>
+        ) : (editHistory?.list.length ?? 0) === 0 ? (
+          <div className="history-status">暂无修改记录</div>
+        ) : (
+          <ol className="history-list">
+            {editHistory!.list.map((log, index) => (
+              <li key={`${log.reportNo ?? ''}-${log.inputtime ?? ''}-${index}`}>
+                <span className="history-seq">{index + 1}、</span>
+                <span className="history-who">{log.operatorName || log.operatorNo || '未知用户'}</span>
+                <span className="history-time">{fmtDateTime(log.inputtime)}</span>
+                <span className="history-action">修改为：</span>
+                <span className="history-text">{editLogPlainText(log.contentAfter)}</span>
+              </li>
+            ))}
+          </ol>
         )}
       </Modal>
     </div>

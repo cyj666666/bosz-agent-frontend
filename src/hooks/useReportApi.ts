@@ -32,6 +32,8 @@ export interface AIRiskItem {
    * 只有取不到时（如历史数据缺字段）才退化为 keywords 文本匹配。</p>
    */
   blockCode?: string;
+  /** 该风险要点在当前日检流水号下的修改记录条数（跨版本累计）；>0 时显示「修改记录(N)」按钮 */
+  editCount?: number;
   /** 段落原始文本（编辑模式恢复用） */
   bodyText?: string;
   /** 段落原始 HTML（编辑模式恢复用） */
