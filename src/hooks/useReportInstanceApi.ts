@@ -20,7 +20,7 @@
  *     故用该文案全量文本作为 keywords，正文段落据此自动挂上 ai-risk-paragraph
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { reportApi, type ReportAiAnalysisItem, type ReportInstanceBlock, type ReportInstanceCatalog, type ReportInstanceDetail, type ReportVersionItem } from '../api/report';
+import { reportApi, type ReportAiAnalysisItem, type ReportInstanceBlock, type ReportInstanceCatalog, type ReportInstanceDetail, type ReportVersionItem, type ReportWarningAdviceVO } from '../api/report';
 import type { AIRiskItem, AIRiskStatus, ReportMeta, SectionItem, SourceTemplateMap } from './useReportApi';
 
 /** 章节（带"是否有溯源按钮"标记，供目录过滤与标识使用） */
@@ -194,6 +194,10 @@ export function useReportInstanceApi(checkTaskNo: string | undefined) {
   const [aiAnalysis, setAiAnalysis] = useState<ReportAiAnalysisItem | null>(null);
   const [aiAnalysisLoading, setAiAnalysisLoading] = useState(false);
 
+  /** AI 预警建议（批次 + 明细），跟着当前版本走 */
+  const [warningAdvice, setWarningAdvice] = useState<ReportWarningAdviceVO | null>(null);
+  const [warningAdviceLoading, setWarningAdviceLoading] = useState(false);
+
   // 版本相关：版本列表 + 当前查看的报告编号 + 更新报告状态
   const [versions, setVersions] = useState<ReportVersionItem[]>([]);
   const [currentReportNo, setCurrentReportNo] = useState<string>('');
@@ -302,6 +306,43 @@ export function useReportInstanceApi(checkTaskNo: string | undefined) {
     return () => window.clearInterval(timer);
   }, [aiAnalysis?.status, currentReportNo, reloadAiAnalysis]);
 
+  // ⑤ AI 预警建议：跟着当前版本走，取该份报告「最近一批」（保留多次，列表按批次倒序）
+  useEffect(() => {
+    let cancelled = false;
+    if (!currentReportNo) {
+      setWarningAdvice(null);
+      return;
+    }
+    setWarningAdviceLoading(true);
+    reportApi.instanceWarningAdvice(currentReportNo)
+      .then(res => {
+        if (!cancelled) setWarningAdvice(res.data ?? null);
+      })
+      .catch(() => { /* 静默：预警建议面板不可用不应影响报告阅读 */ })
+      .finally(() => {
+        if (!cancelled) setWarningAdviceLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [currentReportNo]);
+
+  /** 重新拉取当前报告的预警建议（手动刷新 / 轮询用） */
+  const reloadWarningAdvice = useCallback(async () => {
+    if (!currentReportNo) return;
+    try {
+      const res = await reportApi.instanceWarningAdvice(currentReportNo);
+      setWarningAdvice(res.data ?? null);
+    } catch {
+      /* 轮询失败静默，下次再试 */
+    }
+  }, [currentReportNo]);
+
+  // ⑥ 预警建议生成中时按 10s 轮询
+  useEffect(() => {
+    if (warningAdvice?.status !== 'RUNNING' || !currentReportNo) return;
+    const timer = window.setInterval(() => { reloadWarningAdvice(); }, 10000);
+    return () => window.clearInterval(timer);
+  }, [warningAdvice?.status, currentReportNo, reloadWarningAdvice]);
+
   // ⑤ 有进行中版本时轮询版本列表（感知生成完成）
   useEffect(() => {
     if (!checkTaskNo || !runningVersion) return;
@@ -384,6 +425,17 @@ export function useReportInstanceApi(checkTaskNo: string | undefined) {
     setAiAnalysis(res.data ?? null);
   }, [currentReportNo]);
 
+  /**
+   * 触发一次预警建议生成（后台异步跑）。
+   * <p>依赖该报告已有成功的全文分析，否则后端返回业务错误，由 expectOk 抛出。</p>
+   * <p>同一报告已有进行中的批次时，后端返回「预警建议生成中，请稍后再试」。</p>
+   */
+  const startWarningAdvice = useCallback(async () => {
+    if (!currentReportNo) throw new Error('缺少报告编号，无法生成预警建议');
+    const res = await reportApi.instanceWarningAdviceGenerate(currentReportNo);
+    setWarningAdvice(res.data ?? null);
+  }, [currentReportNo]);
+
   const currentVersion = versions.find(v => v.reportNo === currentReportNo)?.version;
 
   return {
@@ -397,6 +449,11 @@ export function useReportInstanceApi(checkTaskNo: string | undefined) {
     aiAnalysisLoading,
     startAiAnalysis,
     reloadAiAnalysis,
+    warningAdvice,
+    warningAdviceLoading,
+    startWarningAdvice,
+    reloadWarningAdvice,
+    setWarningAdvice,
     setAIRiskList,
     versions,
     currentReportNo,

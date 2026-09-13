@@ -15,7 +15,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Spin, Select, Modal } from 'antd';
 import { CopyOutlined, CheckOutlined, HistoryOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import { useReportInstanceApi } from '../../hooks/useReportInstanceApi';
-import { reportApi, type ReportAiAnalysisItem, type ReportRiskEditLogItem } from '../../api/report';
+import { reportApi, type ReportAiAnalysisItem, type ReportRiskEditLogItem, type ReportWarningAdviceVO } from '../../api/report';
 import {
   type AIRiskItem,
   type AIRiskStatus,
@@ -364,6 +364,53 @@ tr:last-child td { border-bottom: 0; }
 .side-panel.expanded .ai-full-result-body { font-size: 14.5px; }
 .side-panel.expanded .ai-full-result-body h3 { font-size: 16px; }
 .side-panel.expanded .ai-full-result-body h4 { font-size: 15px; }
+
+/* ---------- AI 面板页签（全文分析 / 预警建议） ---------- */
+/* 与上方工具栏同为 sticky，滚动时页签始终可见 */
+.ai-panel-tabs { position: sticky; top: 0; z-index: 3; display: flex; gap: 4px; margin: -2px 0 12px; padding: 4px; border-radius: 12px; background: rgba(240,246,253,.96); backdrop-filter: blur(8px); border: 1px solid var(--line); }
+.ai-panel-tab { flex: 1; padding: 8px 10px; border: 0; border-radius: 9px; background: transparent; font-size: 13px; font-weight: 700; color: var(--muted); cursor: pointer; transition: background .18s ease, color .18s ease; }
+.ai-panel-tab:hover { color: var(--accent); }
+.ai-panel-tab.is-active { color: #fff; background: linear-gradient(135deg, #4f95ff, #1664ff); box-shadow: 0 6px 16px rgba(22,100,255,.24); }
+.ai-panel-body { padding-bottom: 4px; }
+
+/* ---------- 预警建议：核心提示 / 统计 / 表格 ---------- */
+.wa-core-tip { margin: 0 0 12px; padding: 11px 13px; border-left: 4px solid #d98b0a; border-radius: 0 10px 10px 0; background: linear-gradient(180deg, #fffaf0, #fff4e0); font-size: 13px; line-height: 1.85; color: #6b4306; }
+.wa-core-tip-label { display: inline-block; margin-right: 8px; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 800; color: #fff; background: linear-gradient(135deg, #f0a52a, #d98b0a); }
+.wa-stats { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.wa-stat { display: inline-flex; align-items: baseline; gap: 5px; padding: 5px 12px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); background: rgba(246,250,255,.9); color: var(--muted); }
+.wa-stat b { font-size: 13.5px; font-weight: 800; }
+.wa-stat.is-red { border-color: rgba(192,57,43,.28); }
+.wa-stat.is-red b { color: #c0392b; }
+.wa-stat.is-orange { border-color: rgba(217,139,10,.3); }
+.wa-stat.is-orange b { color: #b4710a; }
+.wa-stat.is-yellow { border-color: rgba(176,148,10,.3); }
+.wa-stat.is-yellow b { color: #8d7607; }
+/* 列多（操作 + 模型输出的 7 列 + 状态），侧栏放不下 → 横向滚动，避免像早期 AI 风险表那样「只能看到一列」 */
+.wa-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.wa-table { min-width: 1150px; width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.wa-table th, .wa-table td { padding: 8px 9px; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); vertical-align: top; text-align: left; line-height: 1.7; }
+.wa-table th { position: sticky; top: 0; z-index: 1; background: rgba(237,244,255,.98); font-weight: 800; color: #0f3b57; white-space: nowrap; }
+.wa-table tr:last-child td { border-bottom: 0; }
+.wa-table th:last-child, .wa-table td:last-child { border-right: 0; }
+.wa-op { width: 66px; background: #fff; }
+.wa-seq { text-align: center; font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; }
+.wa-text { word-break: break-word; }
+.wa-row.is-adopted { background: rgba(232,247,238,.7); }
+.wa-row.is-adopted .wa-text { color: #2f6b4f; }
+.wa-row.is-invalid { background: rgba(246,247,249,.9); }
+.wa-row.is-invalid .wa-text { color: #9aa5b1; text-decoration: line-through; }
+/* 等级徽标：红 > 橙 > 黄 */
+.wa-level { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 800; white-space: nowrap; border: 1px solid transparent; }
+.wa-level.is-red { color: #fff; background: linear-gradient(135deg, #e05a4a, #c0392b); }
+.wa-level.is-orange { color: #fff; background: linear-gradient(135deg, #f0a52a, #d98b0a); }
+.wa-level.is-yellow { color: #6b5a06; background: linear-gradient(135deg, #fbe58a, #f2cf55); border-color: rgba(176,148,10,.4); }
+.wa-badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 800; white-space: nowrap; }
+.wa-badge.is-pending { color: #7a6a3a; background: rgba(217,139,10,.12); border: 1px solid rgba(217,139,10,.3); }
+.wa-badge.is-adopted { color: #1e7a4d; background: rgba(46,160,104,.12); border: 1px solid rgba(46,160,104,.3); }
+.wa-badge.is-invalid { color: #7a8592; background: rgba(140,152,168,.14); border: 1px solid rgba(140,152,168,.3); }
+.wa-empty { margin-top: 10px; padding: 26px 12px; border: 1px dashed var(--line); border-radius: 12px; text-align: center; font-size: 13px; color: var(--muted); }
+/* 全屏展开时空间足够，字号放大一点 */
+.side-panel.expanded .wa-table { min-width: 0; font-size: 13px; }
 /* 加载态 / 错误态：占满内容区并居中。
    MainLayout 的 Content 高度 = calc(100vh - 96px)（Header 64 + margin 16×2），
    用同一个算式保证在「内容区正中」，而不是贴在顶部。 */
@@ -620,6 +667,159 @@ function aiFullPanelHTML(item: ReportAiAnalysisItem | null, reading: boolean): s
   </div>`;
 }
 
+/* =============================================================================
+ * AI 预警建议面板（四种状态 + 逐条采纳 / 不采纳）
+ * ---------------------------------------------------------------------------
+ * 从未生成 → 空态 + 「开始生成」（需先有成功的全文分析，点击先弹确认框）
+ * 进行中   → 转圈提示 + 「收起面板」（后台照跑）
+ * 失败     → 原因 + 「重新生成」
+ * 已完成   → 核心提示 + 红橙黄统计 + 预警信号表（每行可采纳 / 不采纳）
+ * ⚠️ 面板 body 是 dangerouslySetInnerHTML 注入的：
+ *     · 按钮靠 data-wa-action / data-ai-full-action 事件委托；
+ *     · 行状态用 class 声明式拼进 <tr>，不能在渲染后 toggle（会被重渲染冲掉）。
+ * ⚠️ 表格列多（操作 + 模型输出的 7 列 + 状态），侧栏 600px 放不下 ——
+ *    先按「横向可滚动」处理，展开（⤢）后基本能整屏看全。
+ * ========================================================================== */
+const WA_LEVEL_TEXT: Record<string, string> = {
+  RED: '红色预警',
+  ORANGE: '橙色预警',
+  YELLOW: '黄色预警',
+};
+
+function waStatusBadge(status: string): string {
+  if (status === 'ADOPTED') return '<span class="wa-badge is-adopted">已采纳</span>';
+  if (status === 'INVALID') return '<span class="wa-badge is-invalid">无效</span>';
+  return '<span class="wa-badge is-pending">待处理</span>';
+}
+
+function warningAdvicePanelHTML(item: ReportWarningAdviceVO | null, reading: boolean): string {
+  if (reading) {
+    return `<div class="ai-full-state">
+      <span class="ai-full-spinner"></span>
+      <div class="ai-full-state-title">正在读取预警建议…</div>
+    </div>`;
+  }
+  if (!item) {
+    return `<div class="ai-full-state">
+      <span class="ai-full-state-icon" aria-hidden>◈</span>
+      <div class="ai-full-state-title">尚未生成预警建议</div>
+      <p class="ai-full-state-desc">将结合本报告正文、风险要点与 AI 全文分析结论，按《预警管理办法》逐条给出预警建议。生成前需先完成「全文分析」。</p>
+      <button class="ai-full-btn" type="button" data-wa-action="start">开始生成</button>
+    </div>`;
+  }
+  if (item.status === 'RUNNING') {
+    return `<div class="ai-full-state">
+      <span class="ai-full-spinner"></span>
+      <div class="ai-full-state-title">预警建议生成中…</div>
+      <p class="ai-full-state-desc">生成在后台运行，收起面板不会中断；稍后重新打开即可查看结果。</p>
+      <button class="ai-full-btn ghost" type="button" data-ai-full-action="close">收起面板</button>
+    </div>`;
+  }
+  if (item.status === 'FAILED') {
+    return `<div class="ai-full-state is-error">
+      <span class="ai-full-state-icon" aria-hidden>!</span>
+      <div class="ai-full-state-title">预警建议生成失败</div>
+      <p class="ai-full-state-desc">${escapeHtml(item.failReason || '未返回失败原因')}</p>
+      <button class="ai-full-btn" type="button" data-wa-action="start">重新生成</button>
+    </div>`;
+  }
+
+  const meta = [
+    item.modelName ? `模型 ${escapeHtml(item.modelName)}` : '',
+    item.costMillis ? `耗时 ${(item.costMillis / 1000).toFixed(1)}s` : '',
+    item.generateTime ? `完成于 ${fmtDateTime(item.generateTime)}` : '',
+    item.operatorName ? `由 ${escapeHtml(item.operatorName)} 触发` : '',
+  ].filter(Boolean).join(' · ');
+
+  const header = `<div class="ai-full-result-bar">
+      <span class="ai-full-result-meta" title="${escapeHtml(meta)}">${meta}</span>
+      <button class="ai-full-btn ghost" type="button" data-wa-action="start">重新生成</button>
+    </div>`;
+
+  const coreTip = item.coreTip
+    ? `<div class="wa-core-tip"><span class="wa-core-tip-label">核心提示</span>${escapeHtml(item.coreTip)}</div>`
+    : '';
+
+  const rows = item.advices ?? [];
+  if (!rows.length) {
+    return `<div class="ai-full-result">${header}${coreTip}
+      <div class="wa-empty">本次未发现预警信号</div>
+    </div>`;
+  }
+
+  const stats = `<div class="wa-stats">
+      <span class="wa-stat is-red">红色预警 <b>${item.redCount ?? 0}</b></span>
+      <span class="wa-stat is-orange">橙色预警 <b>${item.orangeCount ?? 0}</b></span>
+      <span class="wa-stat is-yellow">黄色预警 <b>${item.yellowCount ?? 0}</b></span>
+    </div>`;
+
+  const body = rows
+    .map(r => {
+      const level = (r.warningLevel ?? '').toUpperCase();
+      const status = (r.status ?? 'PENDING').toUpperCase();
+      return `<tr class="wa-row is-${status.toLowerCase()}">
+        <td class="wa-op" data-stop="1">
+          <div class="ai-risk-op-btns">
+            <button class="ai-risk-mini-btn ai-risk-adopt-btn" type="button" data-wa-action="adopt" data-wa-id="${r.id}">采纳</button>
+            <button class="ai-risk-mini-btn ai-risk-invalid-btn" type="button" data-wa-action="invalid" data-wa-id="${r.id}">无效</button>
+          </div>
+        </td>
+        <td class="wa-seq">${r.seqNo ?? ''}</td>
+        <td><span class="wa-level is-${level.toLowerCase()}">${WA_LEVEL_TEXT[level] ?? escapeHtml(r.warningLevel ?? '')}</span></td>
+        <td class="wa-text">${escapeHtml(r.signalDesc ?? '')}</td>
+        <td class="wa-text">${escapeHtml(r.triggerCondition ?? '')}</td>
+        <td class="wa-text">${escapeHtml(r.sourceText ?? '')}</td>
+        <td class="wa-text">${escapeHtml(r.riskDesc ?? '')}</td>
+        <td class="wa-text">${escapeHtml(r.chapter ?? '')}</td>
+        <td>${waStatusBadge(status)}</td>
+      </tr>`;
+    })
+    .join('');
+
+  return `<div class="ai-full-result">${header}${coreTip}${stats}
+    <div class="wa-table-wrap">
+      <table class="wa-table">
+        <thead>
+          <tr>
+            <th class="wa-op">操作</th>
+            <th style="width:46px;text-align:center">序号</th>
+            <th style="width:88px">建议预警等级</th>
+            <th style="width:210px">预警信号描述</th>
+            <th style="width:210px">触发条件/判断依据</th>
+            <th style="width:190px">原文依据（引用原文）</th>
+            <th style="width:170px">风险点描述</th>
+            <th style="width:130px">所在章节/段落</th>
+            <th style="width:76px">状态</th>
+          </tr>
+        </thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+/* =============================================================================
+ * AI 面板外壳：两个页签（全文分析 / 预警建议）
+ * ⚠️ 页签按钮同样走事件委托（data-ai-panel-tab）。
+ * ========================================================================== */
+type AiPanelTab = 'analysis' | 'warning';
+
+function aiPanelHTML(
+  tab: AiPanelTab,
+  analysis: ReportAiAnalysisItem | null,
+  analysisLoading: boolean,
+  advice: ReportWarningAdviceVO | null,
+  adviceLoading: boolean,
+): string {
+  const tabBtn = (key: AiPanelTab, label: string) =>
+    `<button class="ai-panel-tab${tab === key ? ' is-active' : ''}" type="button" data-ai-panel-tab="${key}">${label}</button>`;
+  const body = tab === 'warning'
+    ? warningAdvicePanelHTML(advice, adviceLoading)
+    : aiFullPanelHTML(analysis, analysisLoading);
+  return `<div class="ai-panel-tabs">${tabBtn('analysis', '全文分析')}${tabBtn('warning', '预警建议')}</div>
+    <div class="ai-panel-body">${body}</div>`;
+}
+
 function downloadWord(filename: string, title: string, bodyHtml: string) {
   const content = `<html><head><meta charset="utf-8"><style>
     body{font-family:"Microsoft YaHei",sans-serif;color:#10233f;line-height:1.7}
@@ -702,6 +902,11 @@ export default function ReportView() {
     aiAnalysisLoading,
     startAiAnalysis,
     reloadAiAnalysis,
+    warningAdvice,
+    warningAdviceLoading,
+    startWarningAdvice,
+    reloadWarningAdvice,
+    setWarningAdvice,
     setAIRiskList,
     versions,
     currentReportNo,
@@ -733,6 +938,9 @@ export default function ReportView() {
   /** 报告编号复制按钮的「已复制」瞬时反馈 */
   const [copiedReportNo, setCopiedReportNo] = useState(false);
   const copyTimerRef = useRef<number | null>(null);
+
+  /** AI 面板当前页签：全文分析 / 预警建议（两个页签在同一侧栏面板内切换） */
+  const [aiPanelTab, setAiPanelTab] = useState<AiPanelTab>('analysis');
 
   /** 「修改记录」弹窗状态（null = 关闭；懒加载，点开才请求） */
   const [editHistory, setEditHistory] = useState<{
@@ -1142,6 +1350,71 @@ export default function ReportView() {
     });
   }, [startAiAnalysis, reloadAiAnalysis, showToast]);
 
+  /** 开始 / 重新生成预警建议（先弹确认框） */
+  const handleStartWarningAdvice = useCallback(() => {
+    Modal.confirm({
+      title: '生成预警建议',
+      centered: true,
+      content: '将结合本报告正文、风险要点与已有的 AI 全文分析结论，依据《预警管理办法》逐条给出预警建议。'
+        + '生成在后台运行、耗时可能较长，期间可收起面板继续浏览报告。确认开始吗？',
+      okText: '开始生成',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await startWarningAdvice();
+          showToast('已提交，预警建议生成中', 'success');
+        } catch (e: any) {
+          // 未做全文分析 / 已有进行中的批次时，后端会返回明确原因
+          showToast(e?.message || '生成预警建议失败', 'error');
+          // 顺手刷新一次，让面板切到真实状态
+          void reloadWarningAdvice();
+        }
+      },
+    });
+  }, [startWarningAdvice, reloadWarningAdvice, showToast]);
+
+  /**
+   * 采纳 / 无效 / 恢复待处理（乐观更新 + 失败回滚）
+   * <p>面板 body 是 dangerouslySetInnerHTML 注入的，状态必须走 state 重渲染，
+   * 不能在 DOM 上 command 式改 class（会被重渲染冲掉）。</p>
+   */
+  const setWarningAdviceStatus = useCallback(
+    async (adviceId: number, status: 'adopted' | 'invalid' | 'pending') => {
+      const current = warningAdvice;
+      if (!current || !current.advices) return;
+      const index = current.advices.findIndex(a => a.id === adviceId);
+      if (index < 0) return;
+      const target = current.advices[index];
+      const prevStatus: 'ADOPTED' | 'INVALID' | 'PENDING' = target.status ?? 'PENDING';
+      const nextCode: 'ADOPTED' | 'INVALID' | 'PENDING' =
+        status === 'adopted' ? 'ADOPTED' : status === 'invalid' ? 'INVALID' : 'PENDING';
+      if (prevStatus === nextCode) return;
+
+      // ① 乐观更新：先改 UI
+      setWarningAdvice({
+        ...current,
+        advices: current.advices.map(a => (a.id === adviceId ? { ...a, status: nextCode } : a)),
+      });
+
+      // ② 落库
+      try {
+        await reportApi.instanceWarningAdviceStatus(adviceId, nextCode);
+        showToast(
+          status === 'adopted' ? '已采纳' : status === 'invalid' ? '已标记为无效' : '已恢复为待处理',
+          status === 'invalid' ? 'info' : 'success',
+        );
+      } catch (e: any) {
+        // ③ 失败回滚
+        setWarningAdvice({
+          ...current,
+          advices: current.advices.map(a => (a.id === adviceId ? { ...a, status: prevStatus } : a)),
+        });
+        showToast(e?.message || '操作失败，请重试', 'error');
+      }
+    },
+    [warningAdvice, setWarningAdvice, showToast],
+  );
+
   /* ---- 顶栏按钮：word 下载 ---- */
   const handleDownload = useCallback(() => {
     // 免责声明不在 .section-card 里，必须单独取出来放到最前，否则导出的 Word 会漏掉它
@@ -1262,6 +1535,27 @@ export default function ReportView() {
   const onSidePanelClick = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
       const target = event.target as HTMLElement;
+      // AI 面板页签切换（全文分析 / 预警建议）
+      const tabBtn = target.closest<HTMLElement>('[data-ai-panel-tab]');
+      if (tabBtn) {
+        event.stopPropagation();
+        const tab = tabBtn.getAttribute('data-ai-panel-tab');
+        setAiPanelTab(tab === 'warning' ? 'warning' : 'analysis');
+        return;
+      }
+      // 预警建议面板：开始/重新生成、逐条采纳与无效
+      const waBtn = target.closest<HTMLElement>('[data-wa-action]');
+      if (waBtn) {
+        event.stopPropagation();
+        const action = waBtn.getAttribute('data-wa-action');
+        if (action === 'start') {
+          handleStartWarningAdvice();
+        } else if (action === 'adopt' || action === 'invalid') {
+          setWarningAdviceStatus(Number(waBtn.getAttribute('data-wa-id')),
+            action === 'adopt' ? 'adopted' : 'invalid');
+        }
+        return;
+      }
       // AI 全文分析面板：开始 / 重新分析（先弹确认框）、收起面板（后台继续跑）
       const aiFullBtn = target.closest<HTMLElement>('[data-ai-full-action]');
       if (aiFullBtn) {
@@ -1292,7 +1586,8 @@ export default function ReportView() {
         locateAIRisk(id, true);
       }
     },
-    [setAIRiskStatus, locateAIRisk, openEditHistory, handleStartAiAnalysis, collapsePanel],
+    [setAIRiskStatus, locateAIRisk, openEditHistory, handleStartAiAnalysis, collapsePanel,
+     handleStartWarningAdvice, setWarningAdviceStatus],
   );
 
   /* ---- 侧栏标题与内容 ---- */
@@ -1305,9 +1600,12 @@ export default function ReportView() {
   const sidePanelBody = useMemo(() => {
     // 行高亮随数据一起生成（activeAIRiskId 参与），避免被重渲染冲掉
     if (sidePanelContent.type === 'aiRisk') return aiRiskTableHTML(aiRiskList, activeAIRiskId);
-    if (sidePanelContent.type === 'aiFull') return aiFullPanelHTML(aiAnalysis, aiAnalysisLoading);
+    if (sidePanelContent.type === 'aiFull') {
+      return aiPanelHTML(aiPanelTab, aiAnalysis, aiAnalysisLoading, warningAdvice, warningAdviceLoading);
+    }
     return sourcePanelHtml(sourceTemplates[sidePanelContent.moduleId] ?? []);
-  }, [sidePanelContent, aiRiskList, aiAnalysis, aiAnalysisLoading, sourceTemplates, activeAIRiskId]);
+  }, [sidePanelContent, aiRiskList, aiAnalysis, aiAnalysisLoading,
+      aiPanelTab, warningAdvice, warningAdviceLoading, sourceTemplates, activeAIRiskId]);
 
   /* ---- Loading ---- */
   if (loading) {

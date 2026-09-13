@@ -124,6 +124,60 @@ export interface ReportAiAnalysisItem {
   inputtime?: string;
 }
 
+/** 预警建议 · 单条预警信号（表格一行） */
+export interface ReportWarningAdviceItem {
+  id?: number;
+  batchId?: number;
+  /** 序号（模型输出顺序，已按红>橙>黄排序） */
+  seqNo?: number;
+  /** 建议预警等级：RED-红色 / ORANGE-橙色 / YELLOW-黄色 */
+  warningLevel?: 'RED' | 'ORANGE' | 'YELLOW';
+  /** 预警信号描述 */
+  signalDesc?: string;
+  /** 触发条件/判断依据 */
+  triggerCondition?: string;
+  /** 原文依据（引用原文关键句） */
+  sourceText?: string;
+  /** 风险点描述（未关联到风险点时为空） */
+  riskDesc?: string;
+  /** 所在章节/段落 */
+  chapter?: string;
+  /** 处理状态：PENDING-待处理 / ADOPTED-已采纳 / INVALID-无效 */
+  status?: 'PENDING' | 'ADOPTED' | 'INVALID';
+  operatorName?: string;
+  operatorNo?: string;
+  operateTime?: string;
+}
+
+/** 预警建议（批次 + 明细 + 红橙黄统计） */
+export interface ReportWarningAdviceVO {
+  id?: number;
+  reportNo?: string;
+  checkTaskNo?: string;
+  /** 基于哪一次全文分析生成 */
+  analysisId?: number;
+  /** RUNNING-进行中 / DONE-已完成 / FAILED-失败 */
+  status?: 'RUNNING' | 'DONE' | 'FAILED';
+  /** 核心提示（模型总结，1~3 句话） */
+  coreTip?: string;
+  promptCode?: string;
+  modelName?: string;
+  operatorName?: string;
+  operatorNo?: string;
+  costMillis?: number;
+  failReason?: string;
+  generateTime?: string;
+  inputtime?: string;
+  /** 逐条预警信号 */
+  advices?: ReportWarningAdviceItem[];
+  /** 红色预警条数 */
+  redCount?: number;
+  /** 橙色预警条数 */
+  orangeCount?: number;
+  /** 黄色预警条数 */
+  yellowCount?: number;
+}
+
 /** 风险要点修改记录项（详情页「修改记录」弹窗数据源） */
 export interface ReportRiskEditLogItem {
   /** 是否为「原始版本」（AI 生成的第一版内容）；后端置顶补的人造条目，仅首条可能为 true */
@@ -246,4 +300,19 @@ export const reportApi = {
   /** 查单次全文分析详情 */
   instanceAiAnalysisDetail: (id: number) =>
     expectOk(get<ReportAiAnalysisItem | null>(`/report/instance/ai-analysis/${id}`)),
+
+  /* ---------------- AI 预警建议（依赖全文分析，前端手动触发 + 按状态轮询） ---------------- */
+
+  /** 取某份报告最新一批预警建议（含明细与红橙黄统计）；从未生成过 data 为 null */
+  instanceWarningAdvice: (reportNo: string) =>
+    expectOk(get<ReportWarningAdviceVO | null>(
+      `/report/instance/warning-advice?reportNo=${encodeURIComponent(reportNo)}`)),
+
+  /** 触发一次预警建议生成（异步）；需先有成功的全文分析，且同一报告同时只允许一个批次 */
+  instanceWarningAdviceGenerate: (reportNo: string) =>
+    expectOk(post<ReportWarningAdviceVO>('/report/instance/warning-advice/generate', { reportNo })),
+
+  /** 更新某条预警建议的处理状态（采纳 / 无效 / 待处理） */
+  instanceWarningAdviceStatus: (id: number, status: string) =>
+    expectOk(post<void>('/report/instance/warning-advice/status', { id, status })),
 };
