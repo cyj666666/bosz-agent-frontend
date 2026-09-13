@@ -670,7 +670,7 @@ function aiFullPanelHTML(item: ReportAiAnalysisItem | null, reading: boolean): s
 /* =============================================================================
  * AI 预警建议面板（四种状态 + 逐条采纳 / 不采纳）
  * ---------------------------------------------------------------------------
- * 从未生成 → 空态 + 「开始生成」（需先有成功的全文分析，点击先弹确认框）
+ * 从未生成 → 空态 + 「开始生成」（若已有全文分析会自动作为素材，没有也能生成；点击先弹确认框）
  * 进行中   → 转圈提示 + 「收起面板」（后台照跑）
  * 失败     → 原因 + 「重新生成」
  * 已完成   → 核心提示 + 红橙黄统计 + 预警信号表（每行可采纳 / 不采纳）
@@ -703,7 +703,7 @@ function warningAdvicePanelHTML(item: ReportWarningAdviceVO | null, reading: boo
     return `<div class="ai-full-state">
       <span class="ai-full-state-icon" aria-hidden>◈</span>
       <div class="ai-full-state-title">尚未生成预警建议</div>
-      <p class="ai-full-state-desc">将结合本报告正文、风险要点与 AI 全文分析结论，按《预警管理办法》逐条给出预警建议。生成前需先完成「全文分析」。</p>
+      <p class="ai-full-state-desc">将结合本报告正文与风险要点，并参考已完成的「全文分析」结论（若有），按《预警管理办法》逐条给出预警建议。</p>
       <button class="ai-full-btn" type="button" data-wa-action="start">开始生成</button>
     </div>`;
   }
@@ -1355,8 +1355,8 @@ export default function ReportView() {
     Modal.confirm({
       title: '生成预警建议',
       centered: true,
-      content: '将结合本报告正文、风险要点与已有的 AI 全文分析结论，依据《预警管理办法》逐条给出预警建议。'
-        + '生成在后台运行、耗时可能较长，期间可收起面板继续浏览报告。确认开始吗？',
+      content: '将结合本报告正文与风险要点，并参考已完成的「全文分析」结论（若有），依据《预警管理办法》'
+        + '逐条给出预警建议。生成在后台运行、耗时可能较长，期间可收起面板继续浏览报告。确认开始吗？',
       okText: '开始生成',
       cancelText: '取消',
       onOk: async () => {
@@ -1364,7 +1364,7 @@ export default function ReportView() {
           await startWarningAdvice();
           showToast('已提交，预警建议生成中', 'success');
         } catch (e: any) {
-          // 未做全文分析 / 已有进行中的批次时，后端会返回明确原因
+          // 已有进行中的批次等业务原因，后端会返回明确消息
           showToast(e?.message || '生成预警建议失败', 'error');
           // 顺手刷新一次，让面板切到真实状态
           void reloadWarningAdvice();
