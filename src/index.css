@@ -3,3 +3,70 @@ body {
   font-family: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
   -webkit-font-smoothing: antialiased;
 }
+
+/* =============================================================================
+ * 列表页统一骨架
+ * ---------------------------------------------------------------------------
+ * MainLayout 的 Content 是「固定高 calc(100vh-96px)」，页面必须自己撑满并内部滚动，
+ * 否则内容会被直接裁掉（分页栏就是这么消失的）。
+ *
+ * 用法：
+ *   <div class="page-fill">                 ← 页面根：撑满 + 兜底滚动
+ *     <div class="page-fill-head">…</div>   ← 标题 / 检索区：不参与滚动
+ *     <div class="table-fill">              ← 表格区：吃掉剩余高度
+ *       <div class="table-fill-body">       ← 只有这里滚（min-height:0 是关键，否则被内容顶开）
+ *         <Table pagination={false} … />
+ *       </div>
+ *       <div class="table-fill-pager">      ← 分页栏：放在滚动区**外面** → 永远贴底可见
+ *         <Pagination … />
+ *       </div>
+ *     </div>
+ *   </div>
+ *
+ * ⚠️ 分页栏必须用独立的 <Pagination>，不能用 antd Table 内置分页 + scroll.y 硬算高度：
+ *    检索区会随断点换行、行数不固定，算错就把分页又顶到屏幕外（踩过）。
+ * ========================================================================== */
+.page-fill {
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+}
+.page-fill-head { flex: 0 0 auto; }
+.table-fill {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.table-fill-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.table-fill-pager {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 12px;
+}
+
+/* Tabs 里的列表页：内容要能一路吃掉高度，否则分页还是会被裁 */
+.page-fill .ant-tabs {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.page-fill .ant-tabs-nav { flex: 0 0 auto; margin-bottom: 12px; }
+.page-fill .ant-tabs-content-holder {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.page-fill .ant-tabs-content { flex: 1; min-height: 0; }
+.page-fill .ant-tabs-tabpane { height: 100%; display: flex; flex-direction: column; }

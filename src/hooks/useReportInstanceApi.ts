@@ -336,12 +336,23 @@ export function useReportInstanceApi(checkTaskNo: string | undefined) {
     }
   }, [currentReportNo]);
 
-  // ⑥ 预警建议生成中时按 10s 轮询
+  // ⑥ 预警建议「排队中 / 生成中」都按 10s 轮询
+  //     ⚠️ PENDING 必须纳入轮询：链式触发是先插 PENDING、全文分析跑完才翻 RUNNING，
+  //     只轮询 RUNNING 会让面板永远停在「等待全文分析完成」（2026-09-13 实际踩到）
   useEffect(() => {
-    if (warningAdvice?.status !== 'RUNNING' || !currentReportNo) return;
+    const status = warningAdvice?.status;
+    if ((status !== 'RUNNING' && status !== 'PENDING') || !currentReportNo) return;
     const timer = window.setInterval(() => { reloadWarningAdvice(); }, 10000);
     return () => window.clearInterval(timer);
   }, [warningAdvice?.status, currentReportNo, reloadWarningAdvice]);
+
+  // ⑦ 全文分析一结束就补拉一次预警建议
+  //     续接动作（PENDING → RUNNING）往往就发生在这个时刻，补拉一次能立刻看到，
+  //     不必等下一个 10s 轮询，也避免状态长期停留在旧的 PENDING
+  useEffect(() => {
+    if (aiAnalysis?.status !== 'DONE' && aiAnalysis?.status !== 'FAILED') return;
+    void reloadWarningAdvice();
+  }, [aiAnalysis?.status, reloadWarningAdvice]);
 
   // ⑤ 有进行中版本时轮询版本列表（感知生成完成）
   useEffect(() => {

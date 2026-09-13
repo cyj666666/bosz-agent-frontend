@@ -10,7 +10,7 @@
  * - 3 种面板：AI 风险识别 / 章节溯源 / AI 分析全文
  * - 滚动联动目录 / 回到顶部 / Word 下载 / 关键字过滤
  */
-import { useEffect, useMemo, useRef, useState, useCallback, memo } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback, memo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Spin, Select, Modal } from 'antd';
 import { CopyOutlined, CheckOutlined, HistoryOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
@@ -33,6 +33,9 @@ type SidePanelContent =
 
 /** 版本号展示：后端存整数（1/2/3），前端拼 "V" 前缀；空值返回空串 */
 const fmtVersion = (v?: number | null): string => (v == null ? '' : `V${v}`);
+
+/** 左侧目录收起状态的 localStorage 键（收起后刷新仍保持收起） */
+const NAV_COLLAPSED_KEY = 'bosz_report_nav_collapsed';
 
 /* =============================================================================
  * 全部 CSS —— 从 V5.2 移植
@@ -72,8 +75,15 @@ const REPORT_CSS = `
   overflow-x: hidden;
   padding: 16px 20px 24px;
 }
-/* 展开侧栏时第三列 390 → 600：AI风险识别表要放下「操作/序号/规则名称/风险描述/对应章节/状态」6 列 */
-.report-shell.with-side { grid-template-columns: 260px minmax(0, 1fr) 600px; }
+/* 展开侧栏时第三列 390 → 600 → 720：预警建议表列多，600 只能靠横向滚动看，
+   加宽到 720（内容区 ~667）配合列宽收窄后，7 列一屏可见。
+   侧栏加宽会挤占正文，故把左侧目录同时由 260 压到 200（仅展开侧栏时生效），
+   1600 窗口实测：正文 403 → 343，不至于被压得不像样。 */
+.report-shell.with-side { grid-template-columns: 200px minmax(0, 1fr) 720px; }
+/* 目录收起：整列不渲染，grid 直接少一列，200px 全部让给正文。
+   ⚠️ 必须连 .with-side 一起覆盖 —— 否则会退回「正文 + 720」两列（目录列虽空洞仍占位）。 */
+.report-shell.nav-collapsed { grid-template-columns: minmax(0, 1fr); }
+.report-shell.nav-collapsed.with-side { grid-template-columns: minmax(0, 1fr) 720px; }
 .panel { border-radius: 24px; border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
 .report-nav {
   position: sticky;
@@ -102,11 +112,14 @@ const REPORT_CSS = `
 .copy-btn { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; flex: 0 0 auto; border-radius: 12px; border: 1px solid var(--line); background: #fff; color: var(--muted); cursor: pointer; padding: 0; font-size: 15px; transition: color .18s ease, border-color .18s ease, background .18s ease, transform .18s ease; }
 .copy-btn:hover { color: var(--accent); border-color: rgba(22,100,255,.34); transform: translateY(-1px); }
 .copy-btn.copied { color: #16a34a; border-color: rgba(22,163,74,.36); background: rgba(236,253,245,.92); }
-/* 「智能体分析」：一键串行（全文分析 → 预警建议）的唯一入口，位于大标题右侧 */
-.chain-btn { display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 15px; flex: 0 0 auto; border: 0; border-radius: 12px; color: #fff; font-size: 13.5px; font-weight: 700; letter-spacing: .3px; white-space: nowrap; cursor: pointer; background: linear-gradient(135deg, #4f95ff, #1664ff 58%, #6d5dfc); box-shadow: 0 7px 18px rgba(22,100,255,.28); transition: transform .18s ease, box-shadow .18s ease, filter .18s ease; }
-.chain-btn:hover { transform: translateY(-1px); box-shadow: 0 10px 24px rgba(22,100,255,.34); filter: brightness(1.04); }
+/* 「智能体分析」：一键串行（全文分析 → 预警建议），位于侧边面板顶部（该面板已不显示标题） */
+.chain-btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 36px; padding: 0 15px; flex: 0 0 auto; border: 0; border-radius: 12px; color: #fff; font-size: 13.5px; font-weight: 700; letter-spacing: .3px; white-space: nowrap; cursor: pointer; background: linear-gradient(135deg, #4f95ff, #1664ff 58%, #6d5dfc); box-shadow: 0 7px 18px rgba(22,100,255,.28); transition: transform .18s ease, box-shadow .18s ease, filter .18s ease, opacity .18s ease; }
+.chain-btn-sm { height: 30px; padding: 0 13px; border-radius: 9px; gap: 6px; font-size: 12.5px; box-shadow: 0 4px 12px rgba(22,100,255,.24); }
+.chain-btn:not(:disabled):hover { transform: translateY(-1px); box-shadow: 0 10px 24px rgba(22,100,255,.34); filter: brightness(1.04); }
+.chain-btn:disabled { cursor: not-allowed; opacity: .72; }
 .chain-btn.is-running { background: linear-gradient(135deg, #93bbff, #7aa6f7); box-shadow: 0 5px 14px rgba(22,100,255,.20); }
 .chain-btn-spinner { width: 13px; height: 13px; flex: 0 0 auto; border-radius: 50%; border: 2px solid rgba(255,255,255,.5); border-top-color: #fff; animation: reportStateSpin .85s linear infinite; }
+.chain-btn-sm .chain-btn-spinner { width: 11px; height: 11px; border-width: 1.5px; }
 .sample-badge { margin: 10px 0 0; color: var(--muted); font-size: 13px; font-weight: 700; }
 .toolbar { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .primary-btn, .ghost-btn, .icon-btn { border: 0; border-radius: 14px; padding: 10px 14px; cursor: pointer; transition: transform .18s ease; font: inherit; color: var(--text); }
@@ -115,9 +128,15 @@ const REPORT_CSS = `
 .primary-btn:hover, .ghost-btn:hover, .icon-btn:hover { transform: translateY(-1px); }
 .panel-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
 .panel-head h2 { margin: 0; font-size: 1.15rem; }
+/* 标题 + 紧跟其右的操作按钮（如「智能体分析」），整体靠左，不挤压右侧 toolbar */
+.panel-head-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.panel-head-left h2 { white-space: nowrap; }
 .sticky-head { position: sticky; top: 0; z-index: 3; background: inherit; padding-bottom: 12px; }
 .filter-box { margin-top: 8px; color: var(--muted); font-size: 14px; display: flex; align-items: center; gap: 6px; }
 .chapter-nav { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+/* 目录标题右侧的收起按钮：做成小圆角方形，和侧栏标题栏的 ⤢ / × 同一套语言 */
+.nav-toggle-btn { flex: 0 0 auto; width: 26px; height: 26px; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--muted); font-size: 15px; font-weight: 800; line-height: 1; cursor: pointer; transition: color .16s ease, border-color .16s ease, background .16s ease; }
+.nav-toggle-btn:hover { color: var(--accent); border-color: rgba(22,100,255,.34); background: rgba(240,246,253,.9); }
 .nav-item { display: block; padding: 10px 12px; border-radius: 14px; text-decoration: none; color: inherit; transition: background .18s ease; }
 .nav-item:hover, .nav-item.active { background: rgba(227,239,255,.72); color: var(--accent); }
 .nav-item strong { display: block; line-height: 1.45; font-weight: 700; }
@@ -167,7 +186,7 @@ tr:last-child td { border-bottom: 0; }
 .overview-box { padding: 14px 16px; border: 1px solid rgba(22,100,255,.14); border-radius: 18px; background: linear-gradient(180deg, rgba(245,249,255,.96), rgba(255,255,255,.96)); margin-bottom: 12px; }
 .side-panel { transition: transform .28s ease, opacity .28s ease, box-shadow .28s ease; border: 1px solid rgba(106,90,249,.24); background: linear-gradient(180deg, rgba(255,255,255,.96), rgba(244,248,255,.94)); }
 .side-panel.collapsed { transform: translateX(calc(100% + 28px)); opacity: 0; pointer-events: none; }
-.side-panel.expanded { position: fixed; inset: 16px 16px 16px auto; right: 16px; width: min(960px, calc(100vw - 200px)); max-height: calc(100vh - 32px); z-index: 32; box-shadow: 0 32px 80px rgba(13,31,62,.24); }
+.side-panel.expanded { position: fixed; inset: 16px 16px 16px auto; right: 16px; width: min(1180px, calc(100vw - 200px)); max-height: calc(100vh - 32px); z-index: 32; box-shadow: 0 32px 80px rgba(13,31,62,.24); }
 .source-block { padding: 14px; border: 1px solid var(--line); border-radius: 18px; background: rgba(248,251,255,.95); margin-bottom: 12px; }
 .source-block h4 { margin: 0 0 8px; }
 .source-note { margin: 0 0 12px; color: var(--muted); font-size: 13px; line-height: 1.7; }
@@ -390,26 +409,45 @@ tr:last-child td { border-bottom: 0; }
 .wa-stat.is-orange b { color: #b4710a; }
 .wa-stat.is-yellow { border-color: rgba(176,148,10,.3); }
 .wa-stat.is-yellow b { color: #8d7607; }
-/* 列多（操作 + 模型输出的 7 列 + 状态），侧栏放不下 → 横向滚动，避免像早期 AI 风险表那样「只能看到一列」 */
-.wa-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
-.wa-table { min-width: 1150px; width: 100%; border-collapse: collapse; font-size: 12.5px; }
-.wa-table th, .wa-table td { padding: 8px 9px; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); vertical-align: top; text-align: left; line-height: 1.7; }
-.wa-table th { position: sticky; top: 0; z-index: 1; background: rgba(237,244,255,.98); font-weight: 800; color: #0f3b57; white-space: nowrap; }
+/* 列多（操作 + 序号 + 等级 + 模型输出的 3 列 + 状态），侧栏放不下就横向滚动 */
+/* 横向滚动条「常显」的实现：
+   ① 表格区自己是滚动容器（overflow: auto），横条就归它渲染；
+   ② 关键 —— 让表格区吃掉「页签 / 信息条 / 核心提示 / 统计」之后剩下的高度（见下方 :has() 那段），
+      表格底边恒等于面板内容区底边，横条自然一直贴在看得见的位置。
+   只写 max-height: calc(100vh - 430px) 是不够的：核心提示一长，底边照样被推到可视区外面，
+   就回到「要拉到最下面才看得到横条」。下面这行是给不支持 :has() 的环境兜底。 */
+.wa-table-wrap { overflow: auto; max-height: calc(100vh - 430px); min-height: 180px; padding-bottom: 2px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.side-panel-body:has(.wa-table-wrap) { display: flex; flex-direction: column; }
+.side-panel-body:has(.wa-table-wrap) .ai-panel-tabs { flex: 0 0 auto; }
+.side-panel-body:has(.wa-table-wrap) .ai-panel-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.side-panel-body:has(.wa-table-wrap) .ai-full-result { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.side-panel-body:has(.wa-table-wrap) .wa-table-wrap { flex: 1; max-height: none; }
+.wa-table-wrap::-webkit-scrollbar { height: 12px; width: 10px; }
+.wa-table-wrap::-webkit-scrollbar-track { background: rgba(226,236,248,.72); border-radius: 999px; }
+.wa-table-wrap::-webkit-scrollbar-thumb { background: rgba(22,100,255,.44); border-radius: 999px; border: 2px solid rgba(255,255,255,.9); }
+.wa-table-wrap::-webkit-scrollbar-thumb:hover { background: rgba(22,100,255,.66); }
+/* table-layout: fixed —— 列宽严格按表头给的 width 走（auto 会被长文本顶宽，白给宽度也收不住）；
+   文字一律允许换行，靠窄列 + 换行把列数压进侧栏可视宽度 */
+.wa-table { min-width: 640px; width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 12.5px; }
+.wa-table th, .wa-table td { padding: 7px 8px; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); vertical-align: top; text-align: left; line-height: 1.7; }
+.wa-table th { position: sticky; top: 0; z-index: 1; background: rgba(237,244,255,.98); font-weight: 800; color: #0f3b57; word-break: break-word; }
 .wa-table tr:last-child td { border-bottom: 0; }
 .wa-table th:last-child, .wa-table td:last-child { border-right: 0; }
-.wa-op { width: 66px; background: #fff; }
+.wa-op { width: 58px; background: #fff; }
+/* 操作列压到 58px 后，「采纳/无效」按钮的左右内边距要收紧，否则两字会折行 */
+.wa-op .ai-risk-mini-btn { padding-left: 4px; padding-right: 4px; }
 .wa-seq { text-align: center; font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; }
 .wa-text { word-break: break-word; }
 .wa-row.is-adopted { background: rgba(232,247,238,.7); }
 .wa-row.is-adopted .wa-text { color: #2f6b4f; }
 .wa-row.is-invalid { background: rgba(246,247,249,.9); }
 .wa-row.is-invalid .wa-text { color: #9aa5b1; text-decoration: line-through; }
-/* 等级徽标：红 > 橙 > 黄 */
-.wa-level { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 800; white-space: nowrap; border: 1px solid transparent; }
+/* 等级徽标：红 > 橙 > 黄。列压到 56px 后内边距要收紧，否则 nowrap 的徽标会溢出色块 */
+.wa-level { display: inline-block; padding: 2px 7px; border-radius: 999px; font-size: 11.5px; font-weight: 800; white-space: nowrap; border: 1px solid transparent; }
 .wa-level.is-red { color: #fff; background: linear-gradient(135deg, #e05a4a, #c0392b); }
 .wa-level.is-orange { color: #fff; background: linear-gradient(135deg, #f0a52a, #d98b0a); }
 .wa-level.is-yellow { color: #6b5a06; background: linear-gradient(135deg, #fbe58a, #f2cf55); border-color: rgba(176,148,10,.4); }
-.wa-badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 800; white-space: nowrap; }
+.wa-badge { display: inline-block; padding: 1px 6px; border-radius: 999px; font-size: 11.5px; font-weight: 800; white-space: nowrap; }
 .wa-badge.is-pending { color: #7a6a3a; background: rgba(217,139,10,.12); border: 1px solid rgba(217,139,10,.3); }
 .wa-badge.is-adopted { color: #1e7a4d; background: rgba(46,160,104,.12); border: 1px solid rgba(46,160,104,.3); }
 .wa-badge.is-invalid { color: #7a8592; background: rgba(140,152,168,.14); border: 1px solid rgba(140,152,168,.3); }
@@ -434,8 +472,16 @@ tr:last-child td { border-bottom: 0; }
    实际可用宽度 ≈ 窗口 - 232，所以断点要比直觉更靠右，否则正文会被压到 2~300px。
    故断点 1180 → 1300 → 1500 */
 @media (max-width: 1500px) {
-  .report-shell, .report-shell.with-side { grid-template-columns: 1fr; }
+  /* 窄屏一律单列堆叠：nav-collapsed 的两列规则特异性更高(0,3,0)，必须在这里显式覆盖，
+     否则「收起目录 + 展开侧栏」会变成「正文 + 720」两列挤在小屏上 */
+  .report-shell, .report-shell.with-side, .report-shell.nav-collapsed, .report-shell.nav-collapsed.with-side { grid-template-columns: 1fr; }
   .report-nav, .side-panel { position: relative; top: 0; height: auto; }
+  /* ⚠️ 窄屏堆叠时目录/侧栏必须去掉自身滚动（overflow 非 visible）：
+     带滚动条的 grid item 在 auto 行里的贡献高度会被算塌 —— 实测目录行高只剩 38px（首个子元素标题栏那么高），
+     而目录卡片 638px → 溢出并盖住正文顶部；侧栏同理（行高 38 vs 卡片 743，页面滚动高度少算 24px）。
+     改成 visible 后行高恢复为内容高（637.562 / 742.688），不再重叠、底部也滚得到。
+     宽屏不受影响：那时目录/侧栏是独立列、有定高（100vh-136），靠 overflow 自己滚。 */
+  .report-nav, .side-panel { overflow: visible; }
   .side-panel.collapsed { transform: none; opacity: 1; pointer-events: auto; }
   .side-panel.expanded { position: relative; inset: auto; height: auto; width: auto; }
 }
@@ -453,6 +499,18 @@ tr:last-child td { border-bottom: 0; }
   table { min-width: 0; }
 }
 `;
+
+/**
+ * 注入整站 CSS 的 `{__html}` 对象，**必须在模块级固定引用**（⚠️ 声明位置必须在 REPORT_CSS 之后，
+ * 否则模块初始化时会因 TDZ 报 "Cannot access 'REPORT_CSS' before initialization" 直接白屏）。
+ *
+ * <p>React 对 `dangerouslySetInnerHTML` 是按**对象引用**比较的（react-dom `updateProperties`：
+ * `propKey !== lastProp && setProp(...)`，`setProp` 里直接 `domElement.innerHTML = value.__html`）。
+ * 写成字面量 `{{ __html: REPORT_CSS }}` 就等于「每次渲染都重设这 44KB 的 CSS」——
+ * 本页滚动联动会高频重渲染，白白重解析样式表；同理，面板/正文的 innerHTML 也会被反复重设，
+ * 把滚动位置、注入的 DOM 标记全冲掉。**凡是 dangerouslySetInnerHTML，入参一律 memo 化或提到模块级。**</p>
+ */
+const REPORT_CSS_HTML = { __html: REPORT_CSS };
 
 /* =============================================================================
  * 工具函数
@@ -620,11 +678,11 @@ function sourcePanelHtml(groups: SourceGroup[]): string {
 /* =============================================================================
  * AI 分析全文面板（四种状态）
  * ---------------------------------------------------------------------------
- * 从未分析 → 空态（引导去点标题右侧的「智能体分析」）
+ * 从未分析 → 空态（引导去点面板上方的「智能体分析」）
  * 进行中   → 转圈提示 + 「收起面板」（后台照跑，重新打开凭状态判断）
  * 失败     → 原因（重跑同样走「智能体分析」）
  * 已完成   → 元信息条 + 模型输出的成品 HTML 片段
- * ⚠️ 触发入口已统一到标题右侧的「智能体分析」按钮，面板内不再放任何触发按钮
+ * ⚠️ 触发入口已统一到面板顶部的「智能体分析」按钮，面板内不再放任何触发按钮
  * ⚠️ 面板 body 是 dangerouslySetInnerHTML 注入的，按钮靠 data-ai-full-action 做事件委托。
  * ========================================================================== */
 function aiFullPanelHTML(item: ReportAiAnalysisItem | null, reading: boolean): string {
@@ -638,7 +696,7 @@ function aiFullPanelHTML(item: ReportAiAnalysisItem | null, reading: boolean): s
     return `<div class="ai-full-state">
       <span class="ai-full-state-icon" aria-hidden>◎</span>
       <div class="ai-full-state-title">尚未进行全文分析</div>
-      <p class="ai-full-state-desc">点击标题右侧的「智能体分析」，将先由大模型输出一份全文分析结论，完成后自动接着生成预警建议。</p>
+      <p class="ai-full-state-desc">点击面板上方的「智能体分析」，将先由大模型输出一份全文分析结论，完成后自动接着生成预警建议。</p>
     </div>`;
   }
   if (item.status === 'RUNNING') {
@@ -654,7 +712,7 @@ function aiFullPanelHTML(item: ReportAiAnalysisItem | null, reading: boolean): s
       <span class="ai-full-state-icon" aria-hidden>!</span>
       <div class="ai-full-state-title">全文分析失败</div>
       <p class="ai-full-state-desc">${escapeHtml(item.failReason || '未返回失败原因')}</p>
-      <p class="ai-full-state-desc">需要重跑时，点击标题右侧的「智能体分析」。</p>
+      <p class="ai-full-state-desc">需要重跑时，点击面板上方的「智能体分析」。</p>
     </div>`;
   }
   const meta = [
@@ -675,21 +733,22 @@ function aiFullPanelHTML(item: ReportAiAnalysisItem | null, reading: boolean): s
  * AI 预警建议面板（四种状态 + 逐条采纳 / 不采纳）
  * ---------------------------------------------------------------------------
  * 排队中   → 转圈提示（链式触发已预插批次，等全文分析跑完才真正开始）
- * 从未生成 → 空态（引导去点标题右侧的「智能体分析」）
+ * 从未生成 → 空态（引导去点面板上方的「智能体分析」）
  * 进行中   → 转圈提示 + 「收起面板」（后台照跑）
  * 失败     → 原因（重跑同样走「智能体分析」）
  * 已完成   → 核心提示 + 红橙黄统计 + 预警信号表（每行可采纳 / 不采纳）
- * ⚠️ 触发入口已统一到标题右侧的「智能体分析」按钮，面板内不再放任何触发按钮
+ * ⚠️ 触发入口已统一到面板顶部的「智能体分析」按钮，面板内不再放任何触发按钮
  * ⚠️ 面板 body 是 dangerouslySetInnerHTML 注入的：
  *     · 按钮靠 data-wa-action / data-ai-full-action 事件委托；
  *     · 行状态用 class 声明式拼进 <tr>，不能在渲染后 toggle（会被重渲染冲掉）。
  * ⚠️ 表格列多（操作 + 模型输出的 7 列 + 状态），侧栏 600px 放不下 ——
  *    先按「横向可滚动」处理，展开（⤢）后基本能整屏看全。
  * ========================================================================== */
+/* 等级标签只写颜色（红色/橙色/黄色），不带"预警"二字 */
 const WA_LEVEL_TEXT: Record<string, string> = {
-  RED: '红色预警',
-  ORANGE: '橙色预警',
-  YELLOW: '黄色预警',
+  RED: '红色',
+  ORANGE: '橙色',
+  YELLOW: '黄色',
 };
 
 function waStatusBadge(status: string): string {
@@ -709,7 +768,7 @@ function warningAdvicePanelHTML(item: ReportWarningAdviceVO | null, reading: boo
     return `<div class="ai-full-state">
       <span class="ai-full-state-icon" aria-hidden>◈</span>
       <div class="ai-full-state-title">尚未生成预警建议</div>
-      <p class="ai-full-state-desc">点击标题右侧的「智能体分析」，会先做全文分析，再结合报告正文与风险要点，按《预警管理办法》逐条给出预警建议。</p>
+      <p class="ai-full-state-desc">点击面板上方的「智能体分析」，会先做全文分析，再结合报告正文与风险要点，按《预警管理办法》逐条给出预警建议。</p>
     </div>`;
   }
   if (item.status === 'PENDING') {
@@ -733,7 +792,7 @@ function warningAdvicePanelHTML(item: ReportWarningAdviceVO | null, reading: boo
       <span class="ai-full-state-icon" aria-hidden>!</span>
       <div class="ai-full-state-title">预警建议生成失败</div>
       <p class="ai-full-state-desc">${escapeHtml(item.failReason || '未返回失败原因')}</p>
-      <p class="ai-full-state-desc">需要重跑时，点击标题右侧的「智能体分析」。</p>
+      <p class="ai-full-state-desc">需要重跑时，点击面板上方的「智能体分析」。</p>
     </div>`;
   }
 
@@ -781,8 +840,6 @@ function warningAdvicePanelHTML(item: ReportWarningAdviceVO | null, reading: boo
         <td class="wa-text">${escapeHtml(r.signalDesc ?? '')}</td>
         <td class="wa-text">${escapeHtml(r.triggerCondition ?? '')}</td>
         <td class="wa-text">${escapeHtml(r.sourceText ?? '')}</td>
-        <td class="wa-text">${escapeHtml(r.riskDesc ?? '')}</td>
-        <td class="wa-text">${escapeHtml(r.chapter ?? '')}</td>
         <td>${waStatusBadge(status)}</td>
       </tr>`;
     })
@@ -794,14 +851,15 @@ function warningAdvicePanelHTML(item: ReportWarningAdviceVO | null, reading: boo
         <thead>
           <tr>
             <th class="wa-op">操作</th>
-            <th style="width:46px;text-align:center">序号</th>
-            <th style="width:88px">建议预警等级</th>
-            <th style="width:210px">预警信号描述</th>
-            <th style="width:210px">触发条件/判断依据</th>
-            <th style="width:190px">原文依据（引用原文）</th>
-            <th style="width:170px">风险点描述</th>
-            <th style="width:130px">所在章节/段落</th>
-            <th style="width:76px">状态</th>
+            <th style="width:42px;text-align:center">序号</th>
+            <th style="width:56px">等级</th>
+            <th style="width:146px">预警信号描述</th>
+            <th style="width:146px">触发条件/判断依据</th>
+            <th style="width:132px">原文依据</th>
+            <!-- 「风险点描述」「所在章节/段落」两列：按要求暂时隐藏。
+                 7 列宽度合计 646 ≤ 侧栏内容区 ~667（720 − 左右内边距 36 − 竖滚动条），故不再溢出、不需要拖动。
+                 恢复方法：去掉下面两个 th 的注释并在数据行补回对应 <td>，同时把 .wa-table 的 min-width 提到 900 左右 -->
+            <th style="width:66px">状态</th>
           </tr>
         </thead>
         <tbody>${body}</tbody>
@@ -868,7 +926,7 @@ function downloadWord(filename: string, title: string, bodyHtml: string) {
 function ReportStateShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="report-root">
-      <style dangerouslySetInnerHTML={{ __html: REPORT_CSS }} />
+      <style dangerouslySetInnerHTML={REPORT_CSS_HTML} />
       <div className="report-state">{children}</div>
     </div>
   );
@@ -885,11 +943,14 @@ function ReportStateShell({ children }: { children: React.ReactNode }) {
  * 点不动、编辑不了」的根因。
  * ========================================================================== */
 const SectionCard = memo(function SectionCard({ item }: { item: SectionItem }) {
+  // ⚠️ 同上：入参对象必须 memo 化（React 按引用比较 dangerouslySetInnerHTML），
+  //    否则 item 引用一变、哪怕 HTML 一字未改也会重设 innerHTML，把注入的标记冲掉
+  const bodyHtml = useMemo(() => ({ __html: item.contentHtml }), [item.contentHtml]);
   return (
     <article id={item.id} className="section-card" data-module-id={item.id}>
       <h3>{item.title}</h3>
       {/* 溯源按钮不再单独渲染：它本身就是内容块（SOURCE_LINK），已在正文中渲染为外链按钮 */}
-      <div className="section-body" dangerouslySetInnerHTML={{ __html: item.contentHtml }} />
+      <div className="section-body" dangerouslySetInnerHTML={bodyHtml} />
     </article>
   );
 });
@@ -966,6 +1027,27 @@ export default function ReportView() {
 
   /* 滚动容器（report-shell） — 全报告的滚动只发生在这里 */
   const shellRef = useRef<HTMLDivElement | null>(null);
+
+  /* 左侧目录是否收起：收起后 grid 不再留列，宽度全部让给正文（localStorage 记忆，刷新保持） */
+  const [navCollapsed, setNavCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(NAV_COLLAPSED_KEY) === '1';
+    } catch {
+      // 隐私模式 / 存储被禁用时读会抛，按展开处理
+      return false;
+    }
+  });
+  const toggleNav = useCallback(() => {
+    setNavCollapsed(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem(NAV_COLLAPSED_KEY, next ? '1' : '0');
+      } catch {
+        // 写失败只影响"记住状态"，不影响本次收起/展开
+      }
+      return next;
+    });
+  }, []);
 
   /* collapsed：完全隐藏，grid 不留空。normal：嵌入网格第三列。
      expanded：作为 fixed 浮层覆盖正文，不需要占第三列空间。 */
@@ -1343,24 +1425,25 @@ export default function ReportView() {
     || warningAdvice?.status === 'RUNNING'
     || warningAdvice?.status === 'PENDING';
 
-  /* ---- 一键串行（「智能体分析」按钮）：智能入口 ----
-   * 无结果 / 失败 → 弹确认框并触发整条链（全文分析 → 预警建议）
-   * 进行中 / 已有结果 → 只打开面板查看，不重复触发（避免误点白跑一次模型调用）
+  /* ---- 一键串行（侧边面板顶部的「智能体分析」按钮）----
+   * 按钮就在面板里，点它即触发整条链（全文分析 → 预警建议），不需要再"打开面板"。
+   * 进行中时按钮本身 disabled，这里再兜一道；已有成功结果时用确认框提示会重新生成，
+   * 避免误点白跑一次模型调用（历史记录会保留，符合这批任务"保留多次"的一贯口径）。
    */
   const handleAiChain = useCallback(() => {
-    // 先打开面板：进行中看进度、有结果看结论，都是点它的预期
-    showAIFullAnalysis();
-
-    if (chainRunning || aiAnalysis?.status === 'DONE') {
+    if (chainRunning) {
       return;
     }
 
+    const hasResult = aiAnalysis?.status === 'DONE';
     Modal.confirm({
-      title: '智能体分析',
+      title: hasResult ? '重新进行智能体分析' : '智能体分析',
       centered: true,
-      content: '将先对整份报告做全文分析，完成后自动接着依据《预警管理办法》生成预警建议。'
+      content: (hasResult
+        ? '该报告已完成过智能体分析。重新执行会生成一份新的全文分析与预警建议（历史记录保留）。'
+        : '将先对整份报告做全文分析，完成后自动接着依据《预警管理办法》生成预警建议。')
         + '两步都在后台运行、耗时可能较长，期间可收起面板继续浏览报告。确认开始吗？',
-      okText: '开始分析',
+      okText: hasResult ? '重新分析' : '开始分析',
       cancelText: '取消',
       onOk: async () => {
         try {
@@ -1375,7 +1458,7 @@ export default function ReportView() {
         }
       },
     });
-  }, [chainRunning, aiAnalysis?.status, showAIFullAnalysis, startAiChain,
+  }, [chainRunning, aiAnalysis?.status, startAiChain,
     reloadAiAnalysis, reloadWarningAdvice, showToast]);
 
   /**
@@ -1536,7 +1619,38 @@ export default function ReportView() {
     [editAIRiskParagraph, saveAIRiskParagraph, cancelAIRiskParagraph, openEditHistory, sections, showProvenance],
   );
 
-  /* ---- 侧栏事件代理 ---- */
+  /**
+   * 面板滚动位置守卫。
+   *
+   * <p>侧栏 body 是 `dangerouslySetInnerHTML` 注入的一整段 HTML，**每次数据变化都会整段重建**：
+   * 内层滚动容器（预警建议表是 `.wa-table-wrap`）是新建的元素，`scrollTop` 必然从 0 开始
+   * —— 表现就是「点一下采纳/无效，表格嗖地回到最上面」，如果点的是第 20 条会非常难受。</p>
+   *
+   * <p>所以：在触发重渲染**之前**记住位置（{@link rememberPanelScroll}），
+   * 在 commit 之后、**绘制之前**用 layout effect 还回去（同一次点击只还一次，不留痕迹、不闪）。</p>
+   */
+  const panelScrollGuardRef = useRef<{
+    wrapNode: HTMLElement | null; wrapTop: number;
+    bodyTop: number;
+    tab: AiPanelTab; until: number;
+  } | null>(null);
+
+  /** 记住当前面板滚动位置（必须在 setState 之前调用，重渲染后 DOM 就换了） */
+  const rememberPanelScroll = useCallback(() => {
+    const bodyEl = document.getElementById('side-panel-content');
+    if (!bodyEl) return;
+    const wrapEl = bodyEl.querySelector<HTMLElement>('.wa-table-wrap');
+    panelScrollGuardRef.current = {
+      wrapNode: wrapEl,
+      wrapTop: wrapEl ? wrapEl.scrollTop : 0,
+      bodyTop: bodyEl.scrollTop,
+      tab: aiPanelTab,
+      // 一次点击可能连着触发多次重渲染（乐观更新 → 接口回来 → toast），守卫活 3 秒兜住
+      until: Date.now() + 3000,
+    };
+  }, [aiPanelTab]);
+
+  /** ---- 侧栏事件代理 ---- */
   const onSidePanelClick = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
       const target = event.target as HTMLElement;
@@ -1548,18 +1662,20 @@ export default function ReportView() {
         setAiPanelTab(tab === 'warning' ? 'warning' : 'analysis');
         return;
       }
-      // 预警建议面板：逐条采纳与无效（触发按钮已移到标题右侧的「智能体分析」）
+      // 预警建议面板：逐条采纳与无效（触发按钮已移到面板顶部的「智能体分析」）
       const waBtn = target.closest<HTMLElement>('[data-wa-action]');
       if (waBtn) {
         event.stopPropagation();
         const action = waBtn.getAttribute('data-wa-action');
         if (action === 'adopt' || action === 'invalid') {
+          // 原地更新，不能把用户看了半天的位置甩回最上面
+          rememberPanelScroll();
           setWarningAdviceStatus(Number(waBtn.getAttribute('data-wa-id')),
             action === 'adopt' ? 'adopted' : 'invalid');
         }
         return;
       }
-      // AI 全文分析面板：只剩「收起面板」（触发按钮已移到标题右侧的「智能体分析」）
+      // AI 全文分析面板：只剩「收起面板」（触发按钮已移到面板顶部的「智能体分析」）
       const aiFullBtn = target.closest<HTMLElement>('[data-ai-full-action]');
       if (aiFullBtn) {
         event.stopPropagation();
@@ -1570,6 +1686,8 @@ export default function ReportView() {
       if (actionBtn) {
         const id = Number(actionBtn.getAttribute('data-ai-risk-id'));
         const action = actionBtn.getAttribute('data-ai-risk-action');
+        // AI 风险清单表同样是整段 HTML 重建，同样要把滚动位置捞回来
+        rememberPanelScroll();
         setAIRiskStatus(id, action === 'adopt' ? 'adopted' : 'invalid');
         return;
       }
@@ -1587,13 +1705,14 @@ export default function ReportView() {
         locateAIRisk(id, true);
       }
     },
-    [setAIRiskStatus, locateAIRisk, openEditHistory, collapsePanel, setWarningAdviceStatus],
+    [setAIRiskStatus, locateAIRisk, openEditHistory, collapsePanel, setWarningAdviceStatus, rememberPanelScroll],
   );
 
   /* ---- 侧栏标题与内容 ---- */
   const sidePanelTitle = useMemo(() => {
     if (sidePanelContent.type === 'aiRisk') return 'AI风险识别';
-    if (sidePanelContent.type === 'aiFull') return 'AI 分析全文';
+    // aiFull 面板不给标题：面板里已有「全文分析 / 预警建议」两个页签，再挂一个标题是重复
+    if (sidePanelContent.type === 'aiFull') return '';
     return `${sidePanelContent.moduleTitle} / 溯源信息`;
   }, [sidePanelContent]);
 
@@ -1606,6 +1725,47 @@ export default function ReportView() {
     return sourcePanelHtml(sourceTemplates[sidePanelContent.moduleId] ?? []);
   }, [sidePanelContent, aiRiskList, aiAnalysis, aiAnalysisLoading,
       aiPanelTab, warningAdvice, warningAdviceLoading, sourceTemplates, activeAIRiskId]);
+
+  /**
+   * ⚠️ `dangerouslySetInnerHTML` 的入参**必须 memo 化**，不能每次渲染都写字面量对象。
+   *
+   * <p>React 19 对它是**按对象引用**比较的（react-dom 源码 `updateProperties` 里
+   * `propKey !== lastProp && setProp(...)`，`setProp` 里直接 `domElement.innerHTML = value.__html`）。
+   * 写字面量 `{__html: sidePanelBody}` 意味着"每次渲染都是新对象" → **每次渲染都把整段 innerHTML 重设一遍**
+   * → 面板里表格的滚动位置、选中态等所有 DOM 状态全被冲掉（点采纳/无效后表格跳回顶部就是这么来的）。</p>
+   *
+   * <p>memo 之后只有内容真的变了才重设 DOM，无关重渲染（toast、滚动联动、轮询）都不再动它。</p>
+   */
+  const sidePanelBodyHtml = useMemo(() => ({ __html: sidePanelBody }), [sidePanelBody]);
+
+  /**
+   * DOM 重建后把面板滚动位置还回去（内容真的变了时兜底）。
+   *
+   * <p>用 layout effect（不是 useEffect）：它在 React 换掉 innerHTML 之后、浏览器**绘制之前**同步执行，
+   * 所以看不到"先跳到顶部再弹回来"的闪动。不写依赖数组 = 每次渲染后都检查一遍，
+   * 因为内容变化的时机不止 `sidePanelBody` 一个来源。</p>
+   *
+   * <p>只在「同一个页签 + 距上次动作 3 秒内 + 滚动容器的 DOM 节点被换掉了」时才还原：
+   * 节点没换说明位置本来就还在（用户可能刚自己滚过），这时去设置反而会把用户拽回去。</p>
+   */
+  useLayoutEffect(() => {
+    const guard = panelScrollGuardRef.current;
+    if (!guard) return;
+    if (guard.tab !== aiPanelTab || Date.now() > guard.until) {
+      panelScrollGuardRef.current = null;
+      return;
+    }
+    const bodyEl = document.getElementById('side-panel-content');
+    if (!bodyEl) return;
+    const wrapEl = bodyEl.querySelector<HTMLElement>('.wa-table-wrap');
+    if (wrapEl && guard.wrapTop > 0 && wrapEl !== guard.wrapNode) {
+      wrapEl.scrollTop = guard.wrapTop;
+      guard.wrapNode = wrapEl;
+    }
+    if (guard.bodyTop > 0 && bodyEl.scrollTop === 0) {
+      bodyEl.scrollTop = guard.bodyTop;
+    }
+  });
 
   /* ---- Loading ---- */
   if (loading) {
@@ -1637,37 +1797,51 @@ export default function ReportView() {
   return (
     <div className="report-root">
       {/* 全局 CSS 注入 */}
-      <style dangerouslySetInnerHTML={{ __html: REPORT_CSS }} />
+      <style dangerouslySetInnerHTML={REPORT_CSS_HTML} />
 
-      <div ref={shellRef} className={`report-shell ${sidePanelEmbedded ? 'with-side' : ''}`}>
-        {/* 左：目录 */}
-        <aside className="report-nav panel">
-          <div className="panel-head sticky-head">
-            <h2>报告目录</h2>
-          </div>
-          {/* "只看有溯源模块" 过滤：暂时隐藏（保留逻辑，后续需要时去掉 style 即可恢复） */}
-          <div className="filter-box" style={{ display: 'none' }}>
-            <input
-              id="toggle-dynamic-only"
-              type="checkbox"
-              checked={filterDynamicOnly}
-              onChange={e => setFilterDynamicOnly(e.target.checked)}
-            />
-            <label htmlFor="toggle-dynamic-only">只看有溯源模块</label>
-          </div>
-          <nav className="chapter-nav">
-            {visibleSections.map(item => (
-              <a
-                key={item.id}
-                href={`#${item.id}`}
-                className={`nav-item ${activeSectionKey === item.id ? 'active' : ''}`}
-                onClick={() => setActiveSectionKey(item.id)}
+      <div
+        ref={shellRef}
+        className={`report-shell ${sidePanelEmbedded ? 'with-side' : ''} ${navCollapsed ? 'nav-collapsed' : ''}`}
+      >
+        {/* 左：目录（可收起；收起后整列不渲染，宽度让给正文 / 侧栏） */}
+        {!navCollapsed && (
+          <aside className="report-nav panel">
+            <div className="panel-head sticky-head">
+              <h2>报告目录</h2>
+              <button
+                className="nav-toggle-btn"
+                type="button"
+                onClick={toggleNav}
+                title="收起目录"
+                aria-label="收起目录"
               >
-                <strong>{item.title}</strong>
-              </a>
-            ))}
-          </nav>
-        </aside>
+                ‹
+              </button>
+            </div>
+            {/* "只看有溯源模块" 过滤：暂时隐藏（保留逻辑，后续需要时去掉 style 即可恢复） */}
+            <div className="filter-box" style={{ display: 'none' }}>
+              <input
+                id="toggle-dynamic-only"
+                type="checkbox"
+                checked={filterDynamicOnly}
+                onChange={e => setFilterDynamicOnly(e.target.checked)}
+              />
+              <label htmlFor="toggle-dynamic-only">只看有溯源模块</label>
+            </div>
+            <nav className="chapter-nav">
+              {visibleSections.map(item => (
+                <a
+                  key={item.id}
+                  href={`#${item.id}`}
+                  className={`nav-item ${activeSectionKey === item.id ? 'active' : ''}`}
+                  onClick={() => setActiveSectionKey(item.id)}
+                >
+                  <strong>{item.title}</strong>
+                </a>
+              ))}
+            </nav>
+          </aside>
+        )}
 
         {/* 中：报告主体 */}
         <main className="report-main">
@@ -1703,18 +1877,6 @@ export default function ReportView() {
                     {copiedReportNo ? <CheckOutlined /> : <CopyOutlined />}
                   </button>
                 )}
-                {/* 智能体分析：一键串行（全文分析 → 预警建议）的唯一入口 */}
-                {!!currentReportNo && (
-                  <button
-                    className={`chain-btn${chainRunning ? ' is-running' : ''}`}
-                    type="button"
-                    onClick={handleAiChain}
-                    title={chainRunning ? '智能体分析进行中，点击查看进度' : '一键执行：全文分析 → 预警建议'}
-                  >
-                    {chainRunning && <span className="chain-btn-spinner" aria-hidden />}
-                    <span>{chainRunning ? '智能体分析中…' : '智能体分析'}</span>
-                  </button>
-                )}
               </div>
               <p className="report-page-subtitle">{reportMeta.subtitle}</p>
               <div className="sample-badge">{reportMeta.sampleText}</div>
@@ -1722,6 +1884,15 @@ export default function ReportView() {
             <div className="toolbar">
               <button className="ghost-btn" type="button" style={{ marginRight: 'auto' }} onClick={() => navigate('/reports')}>
                 ← 返回列表
+              </button>
+              {/* 目录开关：目录收起后自身不可见，必须留一个常驻入口才能再展开 */}
+              <button
+                className="ghost-btn"
+                type="button"
+                onClick={toggleNav}
+                title={navCollapsed ? '展开左侧报告目录' : '收起左侧报告目录'}
+              >
+                {navCollapsed ? '显示目录' : '收起目录'}
               </button>
               <button
                 className="ghost-btn"
@@ -1734,6 +1905,9 @@ export default function ReportView() {
               </button>
               <button className="ghost-btn ai-risk-btn" type="button" onClick={showAIRiskPanel}>
                 AI风险识别
+              </button>
+              <button className="ghost-btn" type="button" onClick={showAIFullAnalysis}>
+                AI预警建议
               </button>
               <button className="primary-btn" type="button" onClick={handleDownload}>
                 下载 Word
@@ -1770,7 +1944,21 @@ export default function ReportView() {
         {sidePanelEmbedded && (
           <aside id="side-panel" className="side-panel panel">
             <div className="panel-head sticky-head">
-              <h2>{sidePanelTitle}</h2>
+              <div className="panel-head-left">
+                {sidePanelTitle && <h2>{sidePanelTitle}</h2>}
+                {sidePanelContent.type === 'aiFull' && (
+                  <button
+                    className={`chain-btn chain-btn-sm${chainRunning ? ' is-running' : ''}`}
+                    type="button"
+                    disabled={chainRunning}
+                    onClick={handleAiChain}
+                    title={chainRunning ? '智能体分析进行中' : '一键执行：全文分析 → 预警建议'}
+                  >
+                    {chainRunning && <span className="chain-btn-spinner" aria-hidden />}
+                    <span>{chainRunning ? '分析中…' : '智能体分析'}</span>
+                  </button>
+                )}
+              </div>
               <div className="toolbar">
                 <button className="icon-btn" type="button" title="全屏" onClick={togglePanelSize}>
                   ⤢
@@ -1784,7 +1972,7 @@ export default function ReportView() {
               id="side-panel-content"
               className="side-panel-body"
               onClick={onSidePanelClick}
-              dangerouslySetInnerHTML={{ __html: sidePanelBody }}
+              dangerouslySetInnerHTML={sidePanelBodyHtml}
             />
           </aside>
         )}
@@ -1794,7 +1982,21 @@ export default function ReportView() {
           <>
             <aside id="side-panel" className="side-panel panel expanded">
               <div className="panel-head sticky-head">
-                <h2>{sidePanelTitle}</h2>
+                <div className="panel-head-left">
+                  {sidePanelTitle && <h2>{sidePanelTitle}</h2>}
+                  {sidePanelContent.type === 'aiFull' && (
+                    <button
+                      className={`chain-btn chain-btn-sm${chainRunning ? ' is-running' : ''}`}
+                      type="button"
+                      disabled={chainRunning}
+                      onClick={handleAiChain}
+                      title={chainRunning ? '智能体分析进行中' : '一键执行：全文分析 → 预警建议'}
+                    >
+                      {chainRunning && <span className="chain-btn-spinner" aria-hidden />}
+                      <span>{chainRunning ? '分析中…' : '智能体分析'}</span>
+                    </button>
+                  )}
+                </div>
                 <div className="toolbar">
                   <button className="icon-btn" type="button" title="还原" onClick={togglePanelSize}>
                     ⤡
@@ -1808,7 +2010,7 @@ export default function ReportView() {
                 id="side-panel-content"
                 className="side-panel-body"
                 onClick={onSidePanelClick}
-                dangerouslySetInnerHTML={{ __html: sidePanelBody }}
+                dangerouslySetInnerHTML={sidePanelBodyHtml}
               />
             </aside>
             {/* Backdrop：点击关闭浮层 */}

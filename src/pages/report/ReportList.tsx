@@ -1,16 +1,29 @@
 /**
  * 报告列表页 —— 模板化报告记录（report 表）
  *
- * 数据来源：GET /api/report/instance/page
- * · "查看" → /report/{checkTaskNo}，详情页按日检流水号查最新版本（顶部可切换历史版本）
- * · "生成" → POST /api/report/instance/generate?reportNo=…，按模板加工该报告的实例数据
- *   报告记录由上游预生成（111-待开始），此处只做加工触发，不负责发起报告。
+ * 数据来源：GET /api/report/instance/page（支持全部列检索，返回 total）
+ * · 「发起报告」 → POST /api/report/instance/create，手工创建一条记录（status=111 待开始）
+ * · 「生成」     → POST /api/report/instance/generate?reportNo=…，按模板加工该报告的实例数据
+ * · 「查看」     → /report/{checkTaskNo}，详情页按日检流水号查最新版本（顶部可切换历史版本）
  */
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Table, Button, Tag, message, Popconfirm, Tooltip } from "antd";
-import { EyeOutlined, ThunderboltOutlined } from "@ant-design/icons";
-import { reportApi, type ReportInstanceSummary } from "../../api/report";
+import {
+  Table, Button, Tag, message, Popconfirm, Tooltip, Modal, Form, Input, Select,
+  DatePicker, Row, Col, Space, Pagination,
+} from "antd";
+import {
+  EyeOutlined, ThunderboltOutlined, PlusOutlined, ReloadOutlined,
+} from "@ant-design/icons";
+import type { Dayjs } from "dayjs";
+import {
+  reportApi,
+  type ReportCreatePayload,
+  type ReportInstanceSummary,
+  type ReportPageQuery,
+} from "../../api/report";
+
+const { RangePicker } = DatePicker;
 
 /** 报告状态码 → 展示样式 */
 const STATUS_MAP: Record<string, { color: string; label: string }> = {
@@ -20,28 +33,98 @@ const STATUS_MAP: Record<string, { color: string; label: string }> = {
   "999": { color: "error", label: "失败" },
 };
 
+/** 状态检索下拉项 */
+const STATUS_OPTIONS = Object.entries(STATUS_MAP).map(([value, v]) => ({ value, label: v.label }));
+
 /** 文本列空值兜底：null / undefined / 空串 → "-" */
 const dash = (v?: string | null) => (v === null || v === undefined || v === "" ? "-" : v);
 
+/** 检索表单字段（RangePicker 给的是 [Dayjs, Dayjs]） */
+interface SearchFields {
+  checkTaskNo?: string;
+  customerId?: string;
+  customerName?: string;
+  reportNo?: string;
+  reportTitle?: string;
+  status?: string;
+  userNo?: string;
+  createdRange?: [Dayjs | null, Dayjs | null] | null;
+  updatedRange?: [Dayjs | null, Dayjs | null] | null;
+}
+
+/** 检索区每一项的栅格宽度（窄屏一行两个、宽屏一行四个） */
+const FIELD_COL = { xs: 24, sm: 12, lg: 8, xl: 6 } as const;
+/** 日期范围项更宽一些 */
+const RANGE_COL = { xs: 24, sm: 12, lg: 8, xl: 8 } as const;
+
 export default function ReportList() {
   const [data, setData] = useState<ReportInstanceSummary[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [size, setSize] = useState(10);
+  /** 已提交生效的检索条件（与表单分离：点「查询」才生效） */
+  const [filters, setFilters] = useState<SearchFields>({});
+
+  const [searchForm] = Form.useForm<SearchFields>();
+  const [createForm] = Form.useForm<ReportCreatePayload>();
+  const [createOpen, setCreateOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+
   const navigate = useNavigate();
 
-  /** 加载报告记录（首屏取前 100 条） */
-  const fetchData = async () => {
-    setLoading(true);
-    try {
-      const res = await reportApi.instancePage(1, 100);
-      setData(res.data.records || []);
-    } catch (e: any) {
-      message.error(e?.message || "报告列表加载失败");
-    } finally {
-      setLoading(false);
-    }
+  /** 加载报告记录（检索条件 + 分页） */
+  const fetchData = useCallback(
+    async (pageNo: number, pageSize: number, f: SearchFields) => {
+      setLoading(true);
+      try {
+        const query: ReportPageQuery = {
+          page: pageNo,
+          size: pageSize,
+          checkTaskNo: f.checkTaskNo?.trim() || undefined,
+          customerId: f.customerId?.trim() || undefined,
+          customerName: f.customerName?.trim() || undefined,
+          reportNo: f.reportNo?.trim() || undefined,
+          reportTitle: f.reportTitle?.trim() || undefined,
+          status: f.status || undefined,
+          userNo: f.userNo?.trim() || undefined,
+          createdBegin: f.createdRange?.[0]?.format("YYYY-MM-DD"),
+          createdEnd: f.createdRange?.[1]?.format("YYYY-MM-DD"),
+          updatedBegin: f.updatedRange?.[0]?.format("YYYY-MM-DD"),
+          updatedEnd: f.updatedRange?.[1]?.format("YYYY-MM-DD"),
+        };
+        const res = await reportApi.instancePage(query);
+        setData(res.data.records || []);
+        setTotal(res.data.total || 0);
+      } catch (e: any) {
+        message.error(e?.message || "报告列表加载失败");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [],
+  );
+
+  /** 首屏：无检索条件、第 1 页 */
+  useEffect(() => {
+    void fetchData(1, 10, {});
+  }, [fetchData]);
+
+  /** 点「查询」：重置到第 1 页 */
+  const handleSearch = (values: SearchFields) => {
+    setFilters(values);
+    setPage(1);
+    void fetchData(1, size, values);
   };
-  useEffect(() => { fetchData(); }, []);
+
+  /** 点「重置」：清空条件并回到第 1 页 */
+  const handleReset = () => {
+    searchForm.resetFields();
+    setFilters({});
+    setPage(1);
+    void fetchData(1, size, {});
+  };
 
   /** 触发报告加工（111/999 状态的记录可跑） */
   const handleGenerate = async (reportNo: string) => {
@@ -59,7 +142,30 @@ export default function ReportList() {
       message.error(e?.message || "报告生成失败");
     } finally {
       setGenerating(null);
-      fetchData();
+      void fetchData(page, size, filters);
+    }
+  };
+
+  /** 发起报告：创建一条 status=111 的记录 */
+  const handleCreate = async () => {
+    let values: ReportCreatePayload;
+    try {
+      values = await createForm.validateFields();
+    } catch {
+      return; // 表单校验未通过
+    }
+    setCreating(true);
+    try {
+      const res = await reportApi.instanceCreateReport(values);
+      message.success(`发起成功，报告编号 ${res.data?.reportNo ?? ""}（待开始）`);
+      setCreateOpen(false);
+      createForm.resetFields();
+      setPage(1);
+      void fetchData(1, size, filters);
+    } catch (e: any) {
+      message.error(e?.message || "发起报告失败");
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -132,18 +238,166 @@ export default function ReportList() {
   ];
 
   return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-        <h2>报告列表</h2>
-        <Button onClick={fetchData}>刷新</Button>
+    /* 布局：MainLayout 的 Content 是「固定高 + overflow」，子路由必须自己撑满并内部滚动。
+       骨架见 index.css 的 .page-fill / .table-fill（分页栏放在滚动区外面 → 永远贴底可见）。 */
+    <div className="page-fill">
+      <div className="page-fill-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <h2 style={{ margin: 0 }}>报告列表</h2>
+        <Space>
+          <Button icon={<ReloadOutlined />} onClick={() => fetchData(page, size, filters)}>
+            刷新
+          </Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+            发起报告
+          </Button>
+        </Space>
       </div>
-      <Table
-        columns={columns}
-        dataSource={data}
-        rowKey="reportNo"
-        loading={loading}
-        scroll={{ x: 1600 }}
-      />
+
+      {/* 检索区：覆盖表格全部可检索列（文本模糊 / 状态精确 / 时间区间） */}
+      <Form form={searchForm} onFinish={handleSearch} className="page-fill-head" style={{ marginBottom: 12 }}>
+        <Row gutter={[12, 8]}>
+          <Col {...FIELD_COL}>
+            <Form.Item name="checkTaskNo" label="日检流水号" style={{ marginBottom: 0 }}>
+              <Input allowClear placeholder="模糊匹配" />
+            </Form.Item>
+          </Col>
+          <Col {...FIELD_COL}>
+            <Form.Item name="customerId" label="客户编号" style={{ marginBottom: 0 }}>
+              <Input allowClear placeholder="模糊匹配" />
+            </Form.Item>
+          </Col>
+          <Col {...FIELD_COL}>
+            <Form.Item name="customerName" label="客户名称" style={{ marginBottom: 0 }}>
+              <Input allowClear placeholder="模糊匹配" />
+            </Form.Item>
+          </Col>
+          <Col {...FIELD_COL}>
+            <Form.Item name="reportNo" label="报告编号" style={{ marginBottom: 0 }}>
+              <Input allowClear placeholder="模糊匹配" />
+            </Form.Item>
+          </Col>
+          <Col {...FIELD_COL}>
+            <Form.Item name="reportTitle" label="报告标题" style={{ marginBottom: 0 }}>
+              <Input allowClear placeholder="模糊匹配" />
+            </Form.Item>
+          </Col>
+          <Col {...FIELD_COL}>
+            <Form.Item name="status" label="状态" style={{ marginBottom: 0 }}>
+              <Select allowClear placeholder="全部" options={STATUS_OPTIONS} />
+            </Form.Item>
+          </Col>
+          <Col {...FIELD_COL}>
+            <Form.Item name="userNo" label="用户账号" style={{ marginBottom: 0 }}>
+              <Input allowClear placeholder="模糊匹配" />
+            </Form.Item>
+          </Col>
+          <Col {...RANGE_COL}>
+            <Form.Item name="createdRange" label="创建时间" style={{ marginBottom: 0 }}>
+              <RangePicker style={{ width: "100%" }} />
+            </Form.Item>
+          </Col>
+          <Col {...RANGE_COL}>
+            <Form.Item name="updatedRange" label="生成时间" style={{ marginBottom: 0 }}>
+              <RangePicker style={{ width: "100%" }} />
+            </Form.Item>
+          </Col>
+          <Col {...FIELD_COL} style={{ display: "flex", alignItems: "flex-end" }}>
+            <Space>
+              <Button type="primary" htmlType="submit">查询</Button>
+              <Button onClick={handleReset}>重置</Button>
+            </Space>
+          </Col>
+        </Row>
+      </Form>
+
+      {/* 表格区：flex:1 + minHeight:0 才能让内部真正滚起来（不给 minHeight:0 会被表格内容顶开）；
+          分页栏是它的兄弟节点、不参与滚动，所以常驻可见 */}
+      <div className="table-fill">
+        <div className="table-fill-body">
+          <Table
+            columns={columns}
+            dataSource={data}
+            rowKey="reportNo"
+            loading={loading}
+            scroll={{ x: 1600 }}
+            pagination={false}
+          />
+        </div>
+        <div className="table-fill-pager">
+          <Pagination
+            current={page}
+            pageSize={size}
+            total={total}
+            showSizeChanger
+            showQuickJumper
+            pageSizeOptions={["10", "20", "50", "100"]}
+            showTotal={t => `共 ${t} 条`}
+            onChange={(p, s) => {
+              setPage(p);
+              setSize(s);
+              void fetchData(p, s, filters);
+            }}
+          />
+        </div>
+      </div>
+
+      {/* 发起报告：只收 5 个业务必填项，reportNo / 状态 / 用户账号由服务端补全 */}
+      <Modal
+        open={createOpen}
+        title="发起报告"
+        okText="发起"
+        cancelText="取消"
+        confirmLoading={creating}
+        onOk={handleCreate}
+        onCancel={() => { setCreateOpen(false); createForm.resetFields(); }}
+        destroyOnHidden
+      >
+        <Form
+          form={createForm}
+          layout="vertical"
+          initialValues={{
+            reportTitle: "对公客户日常定期检查报告",
+            reportType: "日常定期检查报告",
+          }}
+        >
+          <Form.Item
+            name="customerId"
+            label="客户编号"
+            rules={[{ required: true, message: "请输入客户编号" }]}
+          >
+            <Input placeholder="如 C0001234" maxLength={64} />
+          </Form.Item>
+          <Form.Item
+            name="customerName"
+            label="客户名称"
+            rules={[{ required: true, message: "请输入客户名称" }]}
+          >
+            <Input placeholder="企业全称" maxLength={128} />
+          </Form.Item>
+          <Form.Item
+            name="checkTaskNo"
+            label="日检流水号"
+            rules={[{ required: true, message: "请输入日检流水号" }]}
+            extra="详情页的入口键；同一流水号下不可重复发起（需要新版本请用「更新报告」）"
+          >
+            <Input placeholder="如 TASK20260913001" maxLength={64} />
+          </Form.Item>
+          <Form.Item
+            name="reportTitle"
+            label="报告标题"
+            rules={[{ required: true, message: "请输入报告标题" }]}
+          >
+            <Input maxLength={300} />
+          </Form.Item>
+          <Form.Item
+            name="reportType"
+            label="报告类型"
+            rules={[{ required: true, message: "请输入报告类型" }]}
+          >
+            <Input maxLength={50} />
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 }

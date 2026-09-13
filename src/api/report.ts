@@ -50,6 +50,43 @@ export interface ReportInstanceSummary {
   updatedAt?: string;
 }
 
+/**
+ * 报告列表检索条件（与表格列一一对应）
+ * <p>文本列后端按「包含」匹配；status 精确匹配；省略的字段即不过滤。</p>
+ */
+export interface ReportPageQuery {
+  page: number;
+  size: number;
+  checkTaskNo?: string;
+  customerId?: string;
+  customerName?: string;
+  reportNo?: string;
+  reportTitle?: string;
+  /** 精确匹配：111 / 000 / 888 / 999 */
+  status?: string;
+  userNo?: string;
+  /** 创建时间范围（yyyy-MM-dd，含当天） */
+  createdBegin?: string;
+  createdEnd?: string;
+  /** 生成（更新）时间范围（yyyy-MM-dd，含当天） */
+  updatedBegin?: string;
+  updatedEnd?: string;
+}
+
+/** 发起报告入参（其余字段由服务端补全） */
+export interface ReportCreatePayload {
+  /** 客户编号 */
+  customerId: string;
+  /** 客户名称 */
+  customerName: string;
+  /** 日检流水号（详情页入口键，同一流水号下不可重复发起） */
+  checkTaskNo: string;
+  /** 报告标题 */
+  reportTitle: string;
+  /** 报告类型 */
+  reportType: string;
+}
+
 /** 报告内容块（实例层） */
 export interface ReportInstanceBlock {
   blockCode: string;
@@ -234,9 +271,13 @@ export interface ReportVersionItem {
 export const reportApi = {
   /* ---------------- 模板化报告实例 ---------------- */
 
-  /** 报告记录分页查询（模板化报告列表） */
-  instancePage: (page: number, size: number, customerId?: string) =>
-    expectOk(get<PageResult<ReportInstanceSummary>>('/report/instance/page', { page, size, customerId })),
+  /** 报告记录分页查询（模板化报告列表，支持全部列检索；返回体带 total） */
+  instancePage: (query: ReportPageQuery) =>
+    expectOk(get<PageResult<ReportInstanceSummary>>('/report/instance/page', { ...query })),
+
+  /** 发起报告：创建一条 report 记录（status=111 待开始，reportNo 由服务端生成） */
+  instanceCreateReport: (payload: ReportCreatePayload) =>
+    expectOk(post<ReportInstanceSummary>('/report/instance/create', payload)),
 
   /** 报告详情（报告头 + 目录树含内容块 + AI 风险列表） */
   instanceDetail: (reportNo: string) =>

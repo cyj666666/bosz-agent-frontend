@@ -2,7 +2,7 @@
  * 指标数据管理页 — 按客户/数据域筛选，分页展示采集解析后的结构化指标
  */
 import { useEffect, useState } from 'react';
-import { Table, Button, Modal, Form, Input, Select, Space, message } from 'antd';
+import { Table, Button, Modal, Form, Input, Select, Space, message, Pagination } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import { indicatorApi } from '../../api/indicator';
 import { customerApi } from '../../api/customer';
@@ -115,8 +115,10 @@ export default function IndicatorList() {
   };
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
+    /* 布局骨架见 index.css 的 .page-fill / .table-fill：
+       MainLayout 的 Content 是固定高，页面必须自己撑满；分页栏放在滚动区外，永远贴底可见 */
+    <div className="page-fill">
+      <div className="page-fill-head" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
         <h2>指标数据</h2>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => {
           setEditing(null);
@@ -126,7 +128,7 @@ export default function IndicatorList() {
       </div>
 
       {/* 筛选栏 */}
-      <Space style={{ marginBottom: 16 }}>
+      <Space className="page-fill-head" style={{ marginBottom: 16 }}>
         <Input.Search
           placeholder="搜索指标编码/名称"
           allowClear
@@ -155,20 +157,28 @@ export default function IndicatorList() {
         />
       </Space>
 
-      <Table
-        columns={cols}
-        dataSource={data}
-        rowKey="id"
-        loading={loading}
-        scroll={{ x: 1260 }}
-        pagination={{
-          current: page,
-          pageSize,
-          total,
-          showSizeChanger: false,
-          onChange: (p) => { setPage(p); fetch(p); },
-        }}
-      />
+      <div className="table-fill">
+        <div className="table-fill-body">
+          <Table
+            columns={cols}
+            dataSource={data}
+            rowKey="id"
+            loading={loading}
+            scroll={{ x: 1260 }}
+            pagination={false}
+          />
+        </div>
+        <div className="table-fill-pager">
+          <Pagination
+            current={page}
+            pageSize={pageSize}
+            total={total}
+            showSizeChanger={false}
+            showTotal={(t) => `共 ${t} 条`}
+            onChange={(p) => { setPage(p); fetch(p); }}
+          />
+        </div>
+      </div>
 
       {/* 新增/编辑弹窗 */}
       <Modal

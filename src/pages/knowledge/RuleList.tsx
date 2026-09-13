@@ -1,8 +1,8 @@
 /**
  * 知识库管理页 — 规则列表 + 场景管理 + 条件/标签完整 CRUD
  */
-import { useEffect, useState } from 'react';
-import { Table, Button, Modal, Drawer, Form, Input, Select, Space, message, Tag, Popconfirm, Descriptions, Tabs } from 'antd';
+import { useEffect, useMemo, useState } from 'react';
+import { Table, Button, Modal, Drawer, Form, Input, Select, Space, message, Tag, Popconfirm, Descriptions, Tabs, Pagination } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import { knowledgeApi } from '../../api/knowledge';
 
@@ -99,11 +99,24 @@ export default function RuleList() {
   const [rType, setRType] = useState<string | undefined>();
   const [rEnabled, setREnabled] = useState<number | undefined>();
 
+  /* 规则表分页：数据是一次性拉回来的（最多 200 条），所以是**前端分页** ——
+     自己切片 + 自己渲染分页栏，这样分页栏能放在滚动区外面、永远贴底可见
+     （交给 antd Table 内置分页就会跟着表体一起滚、被 MainLayout 裁掉）。 */
+  const [rPage, setRPage] = useState(1);
+  const [rSize, setRSize] = useState(10);
+  const pagedRules = useMemo(
+    () => rules.slice((rPage - 1) * rSize, rPage * rSize),
+    [rules, rPage, rSize],
+  );
+
   /** 加载数据 */
   const fetch = async () => {
     setLoading(true);
-    try { const r = await knowledgeApi.pageRule(1, 200, rKeyword || undefined, rType, rEnabled); setRules(r.data.records || []); }
-    finally { setLoading(false); }
+    try {
+      const r = await knowledgeApi.pageRule(1, 200, rKeyword || undefined, rType, rEnabled);
+      setRules(r.data.records || []);
+      setRPage(1);   // 条件变了就回第一页，避免停在越界的页码上
+    } finally { setLoading(false); }
   };
   const fetchS = async () => {
     const r = await knowledgeApi.listScenarios();
@@ -209,15 +222,17 @@ export default function RuleList() {
   ];
 
   return (
-    <div>
-      <h2 style={{ marginBottom: 16 }}>知识库管理</h2>
+    /* 布局骨架见 index.css 的 .page-fill / .table-fill（含让 antd Tabs 内部也能吃掉高度的样式）：
+       页面自己撑满、表体自己滚、分页栏放在滚动区外常驻可见 */
+    <div className="page-fill">
+      <h2 className="page-fill-head" style={{ marginBottom: 16 }}>知识库管理</h2>
       <Tabs items={[
         {
           key: 'rules',
           label: '规则管理',
           children: (
             <>
-              <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div className="page-fill-head" style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Space>
                   <Input.Search
                     placeholder="搜索规则编号/名称"
@@ -254,7 +269,28 @@ export default function RuleList() {
                 <Button type="primary" icon={<PlusOutlined />}
                   onClick={() => { setEditing(null); f.resetFields(); setMOpen(true); }}>新增规则</Button>
               </div>
-              <Table columns={cols} dataSource={rules} rowKey="id" loading={loading} />
+              <div className="table-fill">
+                <div className="table-fill-body">
+                  <Table columns={cols} dataSource={pagedRules} rowKey="id" loading={loading} pagination={false} />
+                </div>
+                <div className="table-fill-pager">
+                  <Pagination
+                    current={rPage}
+                    pageSize={rSize}
+                    total={rules.length}
+                    showSizeChanger
+                    showQuickJumper
+                    pageSizeOptions={['10', '20', '50', '100']}
+                    showTotal={t => `共 ${t} 条`}
+                    onChange={(p, s) => {
+                      // 前端分页：换 pageSize 时页码可能越界，钳一下
+                      const maxPage = Math.max(1, Math.ceil(rules.length / s));
+                      setRSize(s);
+                      setRPage(Math.min(p, maxPage));
+                    }}
+                  />
+                </div>
+              </div>
             </>
           ),
         },

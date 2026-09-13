@@ -132,7 +132,10 @@ export default function MainLayout() {
           background: themeToken.colorBgContainer,
           borderRadius: 8,
           height: 'calc(100vh - 96px)',         // Header 64 + margin 16*2 = 96，子路由内部自滚
-          overflow: 'hidden',
+          // ⚠️ 用 auto 而不是 hidden 做兜底：规范上子路由要自己撑满并内部滚动（见 index.css 的 .page-fill），
+          //    但只要有一个页面忘了，hidden 就会把内容（比如分页栏）**裁得连滚动条都没有、永远够不到**。
+          //    auto 的代价只是"没自滚的页面变成整页滚动"，比"内容不可达"好得多。
+          overflow: 'auto',
         }}>
           <Outlet />
         </Content>
