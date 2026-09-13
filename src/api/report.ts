@@ -97,7 +97,7 @@ export interface ReportInstanceRisk {
   editCount?: number;
 }
 
-/** AI 全文分析记录（详情页「AI分析全文」面板数据源） */
+/** AI 全文分析记录（详情页「智能体分析」面板数据源） */
 export interface ReportAiAnalysisItem {
   id?: number;
   reportNo?: string;
@@ -156,8 +156,8 @@ export interface ReportWarningAdviceVO {
   checkTaskNo?: string;
   /** 基于哪一次全文分析生成 */
   analysisId?: number;
-  /** RUNNING-进行中 / DONE-已完成 / FAILED-失败 */
-  status?: 'RUNNING' | 'DONE' | 'FAILED';
+  /** PENDING-排队中（链式触发已预插，等全文分析完成）/ RUNNING-进行中 / DONE-已完成 / FAILED-失败 */
+  status?: 'PENDING' | 'RUNNING' | 'DONE' | 'FAILED';
   /** 核心提示（模型总结，1~3 句话） */
   coreTip?: string;
   promptCode?: string;
@@ -315,4 +315,15 @@ export const reportApi = {
   /** 更新某条预警建议的处理状态（采纳 / 无效 / 待处理） */
   instanceWarningAdviceStatus: (id: number, status: string) =>
     expectOk(post<void>('/report/instance/warning-advice/status', { id, status })),
+
+  /* ---------------- 一键串行：全文分析 → 预警建议 ---------------- */
+
+  /**
+   * 一键串行触发：先全文分析，结束后自动接着跑预警建议
+   * - 唯一入口是详情页标题右侧的「智能体分析」按钮
+   * - 该报告存在进行中的全文分析、或排队中/进行中的预警建议批次时，后端返回 code!=200（「分析进行中，请稍后再试」）
+   * - 返回的是新建的全文分析记录（status=RUNNING），预警建议批次已排队（status=PENDING）
+   */
+  instanceAiChainGenerate: (reportNo: string) =>
+    expectOk(post<ReportAiAnalysisItem>('/report/instance/ai-chain/generate', { reportNo })),
 };

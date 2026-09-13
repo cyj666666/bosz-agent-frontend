@@ -436,6 +436,27 @@ export function useReportInstanceApi(checkTaskNo: string | undefined) {
     setWarningAdvice(res.data ?? null);
   }, [currentReportNo]);
 
+  /**
+   * 一键串行：全文分析 → 预警建议（详情页标题右侧「智能体分析」按钮的唯一入口）。
+   *
+   * <p>后端会先预插一条 {@code PENDING} 的预警建议批次、再启动全文分析，
+   * 所以这里立刻刷一次预警建议，让面板马上显示「等待全文分析完成」，
+   * 而不是等全文分析跑完才看见第二段。</p>
+   *
+   * <p>链级防重：该报告已有进行中的分析时，后端返回业务错误
+   * 「分析进行中，请稍后再试」，由 expectOk 抛出、调用方提示。</p>
+   */
+  const startAiChain = useCallback(async () => {
+    if (!currentReportNo) throw new Error('缺少报告编号，无法发起分析');
+    const res = await reportApi.instanceAiChainGenerate(currentReportNo);
+    setAiAnalysis(res.data ?? null);
+    try {
+      await reloadWarningAdvice();
+    } catch {
+      /* 拉取失败不影响「链已启动」这个事实，下一次轮询会补上 */
+    }
+  }, [currentReportNo, reloadWarningAdvice]);
+
   const currentVersion = versions.find(v => v.reportNo === currentReportNo)?.version;
 
   return {
@@ -449,6 +470,7 @@ export function useReportInstanceApi(checkTaskNo: string | undefined) {
     aiAnalysisLoading,
     startAiAnalysis,
     reloadAiAnalysis,
+    startAiChain,
     warningAdvice,
     warningAdviceLoading,
     startWarningAdvice,

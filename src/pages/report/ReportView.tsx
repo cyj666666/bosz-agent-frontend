@@ -102,6 +102,11 @@ const REPORT_CSS = `
 .copy-btn { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; flex: 0 0 auto; border-radius: 12px; border: 1px solid var(--line); background: #fff; color: var(--muted); cursor: pointer; padding: 0; font-size: 15px; transition: color .18s ease, border-color .18s ease, background .18s ease, transform .18s ease; }
 .copy-btn:hover { color: var(--accent); border-color: rgba(22,100,255,.34); transform: translateY(-1px); }
 .copy-btn.copied { color: #16a34a; border-color: rgba(22,163,74,.36); background: rgba(236,253,245,.92); }
+/* 「智能体分析」：一键串行（全文分析 → 预警建议）的唯一入口，位于大标题右侧 */
+.chain-btn { display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 15px; flex: 0 0 auto; border: 0; border-radius: 12px; color: #fff; font-size: 13.5px; font-weight: 700; letter-spacing: .3px; white-space: nowrap; cursor: pointer; background: linear-gradient(135deg, #4f95ff, #1664ff 58%, #6d5dfc); box-shadow: 0 7px 18px rgba(22,100,255,.28); transition: transform .18s ease, box-shadow .18s ease, filter .18s ease; }
+.chain-btn:hover { transform: translateY(-1px); box-shadow: 0 10px 24px rgba(22,100,255,.34); filter: brightness(1.04); }
+.chain-btn.is-running { background: linear-gradient(135deg, #93bbff, #7aa6f7); box-shadow: 0 5px 14px rgba(22,100,255,.20); }
+.chain-btn-spinner { width: 13px; height: 13px; flex: 0 0 auto; border-radius: 50%; border: 2px solid rgba(255,255,255,.5); border-top-color: #fff; animation: reportStateSpin .85s linear infinite; }
 .sample-badge { margin: 10px 0 0; color: var(--muted); font-size: 13px; font-weight: 700; }
 .toolbar { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .primary-btn, .ghost-btn, .icon-btn { border: 0; border-radius: 14px; padding: 10px 14px; cursor: pointer; transition: transform .18s ease; font: inherit; color: var(--text); }
@@ -319,7 +324,7 @@ tr:last-child td { border-bottom: 0; }
 .ai-full-conclusion-box p { margin-bottom: 6px; font-size: 15px; line-height: 1.9; color: #0b2b44; }
 .ai-full-highlight { font-weight: 800; color: #004b7a; }
 .ai-full-report-footer { margin-top: 24px; padding-top: 14px; border-top: 1px solid #e6edf4; font-size: 13px; color: #6b7f93; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-/* 「AI分析全文」默认开在窄侧栏里：收紧卡片内边距与字号，避免 30/34px 内边距把 390px 挤爆；
+/* AI 分析面板默认开在窄侧栏里：收紧卡片内边距与字号，避免 30/34px 内边距把 390px 挤爆；
    expanded 全屏浮层保持原样（用 :not(.expanded) 限定） */
 .side-panel:not(.expanded) .ai-full-report-wrap { padding: 0; }
 .side-panel:not(.expanded) .ai-full-report-card { padding: 16px 14px; border-radius: 16px; }
@@ -615,10 +620,11 @@ function sourcePanelHtml(groups: SourceGroup[]): string {
 /* =============================================================================
  * AI 分析全文面板（四种状态）
  * ---------------------------------------------------------------------------
- * 从未分析 → 空态 + 「开始分析」（点击先弹确认框）
+ * 从未分析 → 空态（引导去点标题右侧的「智能体分析」）
  * 进行中   → 转圈提示 + 「收起面板」（后台照跑，重新打开凭状态判断）
- * 失败     → 原因 + 「重新分析」
+ * 失败     → 原因（重跑同样走「智能体分析」）
  * 已完成   → 元信息条 + 模型输出的成品 HTML 片段
+ * ⚠️ 触发入口已统一到标题右侧的「智能体分析」按钮，面板内不再放任何触发按钮
  * ⚠️ 面板 body 是 dangerouslySetInnerHTML 注入的，按钮靠 data-ai-full-action 做事件委托。
  * ========================================================================== */
 function aiFullPanelHTML(item: ReportAiAnalysisItem | null, reading: boolean): string {
@@ -632,8 +638,7 @@ function aiFullPanelHTML(item: ReportAiAnalysisItem | null, reading: boolean): s
     return `<div class="ai-full-state">
       <span class="ai-full-state-icon" aria-hidden>◎</span>
       <div class="ai-full-state-title">尚未进行全文分析</div>
-      <p class="ai-full-state-desc">将整合本报告的正文内容与相关业务数据，由大模型输出一份全文分析结论。</p>
-      <button class="ai-full-btn" type="button" data-ai-full-action="start">开始分析</button>
+      <p class="ai-full-state-desc">点击标题右侧的「智能体分析」，将先由大模型输出一份全文分析结论，完成后自动接着生成预警建议。</p>
     </div>`;
   }
   if (item.status === 'RUNNING') {
@@ -649,7 +654,7 @@ function aiFullPanelHTML(item: ReportAiAnalysisItem | null, reading: boolean): s
       <span class="ai-full-state-icon" aria-hidden>!</span>
       <div class="ai-full-state-title">全文分析失败</div>
       <p class="ai-full-state-desc">${escapeHtml(item.failReason || '未返回失败原因')}</p>
-      <button class="ai-full-btn" type="button" data-ai-full-action="start">重新分析</button>
+      <p class="ai-full-state-desc">需要重跑时，点击标题右侧的「智能体分析」。</p>
     </div>`;
   }
   const meta = [
@@ -661,7 +666,6 @@ function aiFullPanelHTML(item: ReportAiAnalysisItem | null, reading: boolean): s
   return `<div class="ai-full-result">
     <div class="ai-full-result-bar">
       <span class="ai-full-result-meta" title="${escapeHtml(meta)}">${meta}</span>
-      <button class="ai-full-btn ghost" type="button" data-ai-full-action="start">重新分析</button>
     </div>
     <div class="ai-full-result-body">${item.analysisContent ?? ''}</div>
   </div>`;
@@ -670,10 +674,12 @@ function aiFullPanelHTML(item: ReportAiAnalysisItem | null, reading: boolean): s
 /* =============================================================================
  * AI 预警建议面板（四种状态 + 逐条采纳 / 不采纳）
  * ---------------------------------------------------------------------------
- * 从未生成 → 空态 + 「开始生成」（若已有全文分析会自动作为素材，没有也能生成；点击先弹确认框）
+ * 排队中   → 转圈提示（链式触发已预插批次，等全文分析跑完才真正开始）
+ * 从未生成 → 空态（引导去点标题右侧的「智能体分析」）
  * 进行中   → 转圈提示 + 「收起面板」（后台照跑）
- * 失败     → 原因 + 「重新生成」
+ * 失败     → 原因（重跑同样走「智能体分析」）
  * 已完成   → 核心提示 + 红橙黄统计 + 预警信号表（每行可采纳 / 不采纳）
+ * ⚠️ 触发入口已统一到标题右侧的「智能体分析」按钮，面板内不再放任何触发按钮
  * ⚠️ 面板 body 是 dangerouslySetInnerHTML 注入的：
  *     · 按钮靠 data-wa-action / data-ai-full-action 事件委托；
  *     · 行状态用 class 声明式拼进 <tr>，不能在渲染后 toggle（会被重渲染冲掉）。
@@ -703,8 +709,15 @@ function warningAdvicePanelHTML(item: ReportWarningAdviceVO | null, reading: boo
     return `<div class="ai-full-state">
       <span class="ai-full-state-icon" aria-hidden>◈</span>
       <div class="ai-full-state-title">尚未生成预警建议</div>
-      <p class="ai-full-state-desc">将结合本报告正文与风险要点，并参考已完成的「全文分析」结论（若有），按《预警管理办法》逐条给出预警建议。</p>
-      <button class="ai-full-btn" type="button" data-wa-action="start">开始生成</button>
+      <p class="ai-full-state-desc">点击标题右侧的「智能体分析」，会先做全文分析，再结合报告正文与风险要点，按《预警管理办法》逐条给出预警建议。</p>
+    </div>`;
+  }
+  if (item.status === 'PENDING') {
+    return `<div class="ai-full-state">
+      <span class="ai-full-spinner"></span>
+      <div class="ai-full-state-title">等待全文分析完成…</div>
+      <p class="ai-full-state-desc">预警建议已排队，全文分析一结束就会自动开始；收起面板不会中断。</p>
+      <button class="ai-full-btn ghost" type="button" data-ai-full-action="close">收起面板</button>
     </div>`;
   }
   if (item.status === 'RUNNING') {
@@ -720,7 +733,7 @@ function warningAdvicePanelHTML(item: ReportWarningAdviceVO | null, reading: boo
       <span class="ai-full-state-icon" aria-hidden>!</span>
       <div class="ai-full-state-title">预警建议生成失败</div>
       <p class="ai-full-state-desc">${escapeHtml(item.failReason || '未返回失败原因')}</p>
-      <button class="ai-full-btn" type="button" data-wa-action="start">重新生成</button>
+      <p class="ai-full-state-desc">需要重跑时，点击标题右侧的「智能体分析」。</p>
     </div>`;
   }
 
@@ -733,7 +746,6 @@ function warningAdvicePanelHTML(item: ReportWarningAdviceVO | null, reading: boo
 
   const header = `<div class="ai-full-result-bar">
       <span class="ai-full-result-meta" title="${escapeHtml(meta)}">${meta}</span>
-      <button class="ai-full-btn ghost" type="button" data-wa-action="start">重新生成</button>
     </div>`;
 
   const coreTip = item.coreTip
@@ -900,11 +912,10 @@ export default function ReportView() {
     sourceTemplates,
     aiAnalysis,
     aiAnalysisLoading,
-    startAiAnalysis,
+    startAiChain,
     reloadAiAnalysis,
     warningAdvice,
     warningAdviceLoading,
-    startWarningAdvice,
     reloadWarningAdvice,
     setWarningAdvice,
     setAIRiskList,
@@ -1327,51 +1338,45 @@ export default function ReportView() {
     }
   }, [currentReportNo, showToast]);
 
-  /* ---- AI 全文分析：先确认再触发。分析在后台跑，前端凭 status 轮询 ---- */
-  const handleStartAiAnalysis = useCallback(() => {
+  /** 整条链是否有任务在跑：全文分析进行中，或预警建议排队中/进行中（链式触发会先排一条 PENDING） */
+  const chainRunning = aiAnalysis?.status === 'RUNNING'
+    || warningAdvice?.status === 'RUNNING'
+    || warningAdvice?.status === 'PENDING';
+
+  /* ---- 一键串行（「智能体分析」按钮）：智能入口 ----
+   * 无结果 / 失败 → 弹确认框并触发整条链（全文分析 → 预警建议）
+   * 进行中 / 已有结果 → 只打开面板查看，不重复触发（避免误点白跑一次模型调用）
+   */
+  const handleAiChain = useCallback(() => {
+    // 先打开面板：进行中看进度、有结果看结论，都是点它的预期
+    showAIFullAnalysis();
+
+    if (chainRunning || aiAnalysis?.status === 'DONE') {
+      return;
+    }
+
     Modal.confirm({
-      title: '开始全文分析',
+      title: '智能体分析',
       centered: true,
-      content: '将整合本报告的正文内容与相关业务数据，调用大模型生成一份全文分析。'
-        + '分析在后台运行、耗时可能较长，期间可收起面板继续浏览报告。确认开始吗？',
+      content: '将先对整份报告做全文分析，完成后自动接着依据《预警管理办法》生成预警建议。'
+        + '两步都在后台运行、耗时可能较长，期间可收起面板继续浏览报告。确认开始吗？',
       okText: '开始分析',
       cancelText: '取消',
       onOk: async () => {
         try {
-          await startAiAnalysis();
-          showToast('已提交，全文分析进行中', 'success');
+          await startAiChain();
+          showToast('已提交，智能体分析进行中', 'success');
         } catch (e: any) {
-          // 已有进行中的分析时后端返回「全文分析进行中，请稍后再试」
-          showToast(e?.message || '发起全文分析失败', 'error');
-          // 顺手刷新一次，让面板切到「进行中」的真实状态
+          // 链级防重时后端返回「分析进行中，请稍后再试」
+          showToast(e?.message || '发起分析失败', 'error');
+          // 顺手刷新，让面板切到真实状态
           void reloadAiAnalysis();
-        }
-      },
-    });
-  }, [startAiAnalysis, reloadAiAnalysis, showToast]);
-
-  /** 开始 / 重新生成预警建议（先弹确认框） */
-  const handleStartWarningAdvice = useCallback(() => {
-    Modal.confirm({
-      title: '生成预警建议',
-      centered: true,
-      content: '将结合本报告正文与风险要点，并参考已完成的「全文分析」结论（若有），依据《预警管理办法》'
-        + '逐条给出预警建议。生成在后台运行、耗时可能较长，期间可收起面板继续浏览报告。确认开始吗？',
-      okText: '开始生成',
-      cancelText: '取消',
-      onOk: async () => {
-        try {
-          await startWarningAdvice();
-          showToast('已提交，预警建议生成中', 'success');
-        } catch (e: any) {
-          // 已有进行中的批次等业务原因，后端会返回明确消息
-          showToast(e?.message || '生成预警建议失败', 'error');
-          // 顺手刷新一次，让面板切到真实状态
           void reloadWarningAdvice();
         }
       },
     });
-  }, [startWarningAdvice, reloadWarningAdvice, showToast]);
+  }, [chainRunning, aiAnalysis?.status, showAIFullAnalysis, startAiChain,
+    reloadAiAnalysis, reloadWarningAdvice, showToast]);
 
   /**
    * 采纳 / 无效 / 恢复待处理（乐观更新 + 失败回滚）
@@ -1543,26 +1548,22 @@ export default function ReportView() {
         setAiPanelTab(tab === 'warning' ? 'warning' : 'analysis');
         return;
       }
-      // 预警建议面板：开始/重新生成、逐条采纳与无效
+      // 预警建议面板：逐条采纳与无效（触发按钮已移到标题右侧的「智能体分析」）
       const waBtn = target.closest<HTMLElement>('[data-wa-action]');
       if (waBtn) {
         event.stopPropagation();
         const action = waBtn.getAttribute('data-wa-action');
-        if (action === 'start') {
-          handleStartWarningAdvice();
-        } else if (action === 'adopt' || action === 'invalid') {
+        if (action === 'adopt' || action === 'invalid') {
           setWarningAdviceStatus(Number(waBtn.getAttribute('data-wa-id')),
             action === 'adopt' ? 'adopted' : 'invalid');
         }
         return;
       }
-      // AI 全文分析面板：开始 / 重新分析（先弹确认框）、收起面板（后台继续跑）
+      // AI 全文分析面板：只剩「收起面板」（触发按钮已移到标题右侧的「智能体分析」）
       const aiFullBtn = target.closest<HTMLElement>('[data-ai-full-action]');
       if (aiFullBtn) {
         event.stopPropagation();
-        const action = aiFullBtn.getAttribute('data-ai-full-action');
-        if (action === 'close') collapsePanel();
-        else if (action === 'start') handleStartAiAnalysis();
+        if (aiFullBtn.getAttribute('data-ai-full-action') === 'close') collapsePanel();
         return;
       }
       const actionBtn = target.closest<HTMLElement>('[data-ai-risk-action]');
@@ -1586,8 +1587,7 @@ export default function ReportView() {
         locateAIRisk(id, true);
       }
     },
-    [setAIRiskStatus, locateAIRisk, openEditHistory, handleStartAiAnalysis, collapsePanel,
-     handleStartWarningAdvice, setWarningAdviceStatus],
+    [setAIRiskStatus, locateAIRisk, openEditHistory, collapsePanel, setWarningAdviceStatus],
   );
 
   /* ---- 侧栏标题与内容 ---- */
@@ -1703,6 +1703,18 @@ export default function ReportView() {
                     {copiedReportNo ? <CheckOutlined /> : <CopyOutlined />}
                   </button>
                 )}
+                {/* 智能体分析：一键串行（全文分析 → 预警建议）的唯一入口 */}
+                {!!currentReportNo && (
+                  <button
+                    className={`chain-btn${chainRunning ? ' is-running' : ''}`}
+                    type="button"
+                    onClick={handleAiChain}
+                    title={chainRunning ? '智能体分析进行中，点击查看进度' : '一键执行：全文分析 → 预警建议'}
+                  >
+                    {chainRunning && <span className="chain-btn-spinner" aria-hidden />}
+                    <span>{chainRunning ? '智能体分析中…' : '智能体分析'}</span>
+                  </button>
+                )}
               </div>
               <p className="report-page-subtitle">{reportMeta.subtitle}</p>
               <div className="sample-badge">{reportMeta.sampleText}</div>
@@ -1722,9 +1734,6 @@ export default function ReportView() {
               </button>
               <button className="ghost-btn ai-risk-btn" type="button" onClick={showAIRiskPanel}>
                 AI风险识别
-              </button>
-              <button className="ghost-btn" type="button" onClick={showAIFullAnalysis}>
-                AI分析全文
               </button>
               <button className="primary-btn" type="button" onClick={handleDownload}>
                 下载 Word
