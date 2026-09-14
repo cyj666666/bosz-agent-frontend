@@ -7,6 +7,7 @@ import { Table, Button, Modal, Form, Input, Select, Space, message, Popconfirm }
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import { roleApi } from '../../api/role';
 import type { Role } from '../../types';
+import { agentMenuOptions } from '../../agent';
 
 export default function RoleList() {
   const [data, setData] = useState<Role[]>([]);
@@ -44,12 +45,10 @@ export default function RoleList() {
     } catch { message.error('操作失败'); }
   };
 
+  // agent 模块的菜单权限项由 src/agent 提供，这里只做合并——新增 agent 页面不需要改本文件
   const menuOptions = [
     { label: '报告管理', value: '/reports' },
-    { label: '客户管理', value: '/customers' },
-    { label: '数据源配置', value: '/data-config' },
-    { label: '指标数据', value: '/indicators' },
-    { label: '知识库管理', value: '/rules' },
+    ...agentMenuOptions,
     { label: '用户管理（系统管理）', value: '/users' },
     { label: '角色管理（系统管理）', value: '/roles' },
   ];

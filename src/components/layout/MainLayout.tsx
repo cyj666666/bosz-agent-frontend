@@ -2,22 +2,25 @@
  * 主布局 — 侧边导航 + 顶栏(用户名/退出) + 内容区
  *
  * 结构：
- *   左侧 Sider → 可折叠菜单导航（4 个模块）
+ *   左侧 Sider → 可折叠菜单导航
  *   右侧 Layout → Header 标题栏 + 用户信息 + Content（Outlet 渲染子路由页面）
+ *
+ * 菜单来源：宿主菜单（报告管理、系统管理）+ agent 模块菜单（src/agent 的 agentMenus）。
+ * 可见性：由登录返回的 menus 权限数组过滤；'*' 表示超管全量可见。
  */
 import { useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { Layout, Menu, Button, Modal, Form, Input, Space, theme, message } from 'antd';
-import { LockOutlined, LogoutOutlined, UserOutlined, SecurityScanOutlined } from '@ant-design/icons';
 import {
+  LockOutlined,
+  LogoutOutlined,
+  UserOutlined,
+  SecurityScanOutlined,
   FileTextOutlined,
-  TeamOutlined,
-  SettingOutlined,
-  SafetyCertificateOutlined,
-  FundOutlined,
 } from '@ant-design/icons';
 import { useAppStore } from '../../store';
 import { userApi } from '../../api/user';
+import { agentMenus } from '../../agent';
 
 const { Header, Sider, Content } = Layout;
 
@@ -39,16 +42,14 @@ export default function MainLayout() {
     } catch { message.error('密码修改失败'); }
   };
 
-  /** 根据当前路径高亮对应菜单项 */
-  const selectedKey = '/' + (location.pathname.split('/')[1] || 'reports');
-
-  /** 菜单项：根据登录返回的 menus 权限控制可见性 */
+  /**
+   * 菜单项：根据登录返回的 menus 权限控制可见性
+   *
+   * agent 模块的菜单由 src/agent 提供，这里只做合并——新增 agent 页面不需要改本文件。
+   */
   const allMenus: Record<string, any> = {
     '/reports': { key: '/reports', icon: <FileTextOutlined />, label: '报告管理' },
-    '/customers': { key: '/customers', icon: <TeamOutlined />, label: '客户管理' },
-    '/data-config': { key: '/data-config', icon: <SettingOutlined />, label: '数据源配置' },
-    '/indicators': { key: '/indicators', icon: <FundOutlined />, label: '指标数据' },
-    '/rules': { key: '/rules', icon: <SafetyCertificateOutlined />, label: '知识库管理' },
+    ...Object.fromEntries(agentMenus.map((m) => [m.key, m])),
     '__system__': {
       key: 'system',
       icon: <SecurityScanOutlined />,
@@ -56,6 +57,25 @@ export default function MainLayout() {
       children: [] as any[],
     },
   };
+
+  /**
+   * 当前路径对应的菜单 key
+   *
+   * 不能简单取一级路径段：agent 模块是两级路径（/agent/xxx），取一级会得到 '/agent' 匹配不到任何菜单。
+   * 这里按"最长匹配前缀"解析，明细页（如 /report/123）也能正确高亮到父菜单。
+   */
+  const selectedKey = (() => {
+    const path = location.pathname;
+    const candidates = [
+      ...Object.keys(allMenus).filter((k) => k !== '__system__'),
+      '/users',
+      '/roles',
+    ];
+    const hit = candidates
+      .filter((k) => path === k || path.startsWith(k + '/'))
+      .sort((a, b) => b.length - a.length)[0];
+    return hit || path;
+  })();
 
   const menuItems: any[] = [];
 
