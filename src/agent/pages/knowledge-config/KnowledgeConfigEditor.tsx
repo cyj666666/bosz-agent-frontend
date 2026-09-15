@@ -462,7 +462,23 @@ export function KnowledgeConfigEditor({
     });
   };
 
-  const hasAuth = true; // 源工程由 `knowledge:output` 权限 + `result.hasAuth` 决定；宿主权限体系不同，这里默认放开
+  /**
+   * 「输出要求 / 核心提示词 / 分段与检索策略」的显示开关
+   *
+   * 源工程 `showOutputSection = configInfo.hasAuth === true || hasPermission('index:output')`。
+   * 宿主没有 `index:output` 权限项，所以只保留前半截 —— **必须用后端返回的 `hasAuth`**。
+   *
+   * 🔴 判定链路（2026-09-15 核对代码 + 真实数据后确定，勿改回硬编码）：
+   *   后端 `queryKnowledgeBaseParamsInfo` 拿 `ApiContextModel.getRole()`（内容是**角色主键
+   *   `sys_role.id` 的 JSON 数组串**，见 `ApiContext#resolveFromRequest`）去查
+   *   `sys_role_knowledge_output`：`role_id IN (当前用户角色主键) AND knowledge_id = paramId`，
+   *   命中才回 `hasAuth = true`。其中 `knowledge_id` 存的就是 `knowledge_base_params.paramid`。
+   *
+   * ⚠️ 早期这里写死 `true`（当时理由是"宿主权限体系不同"），会让**所有**用户都看到
+   *   「输出要求 / 核心提示词 / 分段与检索策略」。实测公司库 `sys_role_knowledge_output` **只有 1 行**
+   *   （单个角色对单个知识库），即真实环境下绝大多数角色本就不该看到这一块。
+   */
+  const hasAuth = configInfo.hasAuth === true;
 
   return (
     <>

@@ -51,6 +51,11 @@
  *   5. 参数映射表格（`paramData`）7 列 + 单行编辑 + 增删改见 `ParamMappingTable.tsx`；
  *      源工程它就在本组件的 SQL 分支里（`paramsTableData`），**并非由外层维护**（旧注释写错，已更正）。
  *   6. SQL 预览的单元格详情由"点击弹窗"改为 `Tooltip`（信息等价，少一层弹窗）。
+ *   7. **`script` 为空串时不主动"补"成 JSON**（已核对：这是正确行为，勿改成"总是写回"）。
+ *      实测公司库 **945/1086 条指标的 `script` 是空串**（87%），本组件**只在用户真正操作
+ *      数据源配置时才写回**（`flush` 由交互触发，载入的 effect 不写回）——所以"打开一条空 script
+ *      的指标、什么都不改就保存"仍提交空串。这样避免把 945 条空配置无端变成 `{dataSource:'',…}`。
+ *      源工程 `getValue()` 反而是"总是返回那坨 JSON"，此处是有意收紧。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {

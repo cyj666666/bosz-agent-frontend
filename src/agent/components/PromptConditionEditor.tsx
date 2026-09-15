@@ -215,7 +215,9 @@ export const PromptConditionEditor = forwardRef<PromptConditionEditorHandle, Pro
       variant = 'prompt',
       modelOptions = [],
       groupOptions = [],
-      hasAuth = true,
+      // 默认 false（fail-closed）：它是「核心提示词」的**权限开关**，漏传时不应放开。
+      // 唯一的 variant='output' 调用点（KnowledgeConfigEditor）始终显式传入后端返回的 hasAuth。
+      hasAuth = false,
       elseValue,
       onElseChange,
       tabType = 'index',
