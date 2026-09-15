@@ -6,6 +6,7 @@
  * 类级路径是 `/api/agent/sys/dataSource`）。
  */
 import { agentGet, agentPost } from './agentRequest';
+import type { AgentListResult } from '../types';
 
 /**
  * 数据源下拉项
@@ -62,24 +63,56 @@ function pickList<T>(res: unknown): T[] {
   return [];
 }
 
+/**
+ * 归一成完整的 `AgentListResult`（**保留 `totalCount`**）
+ *
+ * 与 `pickList` 的区别：`pickList` 只取数组、丢掉总数；分页场景必须留总数
+ * （表列表要显示「共 N 条」，且 N 是**服务端过滤后的总数**，不是当页条数）。
+ */
+function toListResult<T>(res: unknown): AgentListResult<T> {
+  const list = pickList<T>(res);
+  const obj = (res ?? {}) as Record<string, unknown>;
+  return {
+    list,
+    totalCount: typeof obj.totalCount === 'number' ? obj.totalCount : list.length,
+    pageSize: Number(obj.pageSize ?? 0),
+    pageIndex: Number(obj.pageIndex ?? 1),
+    columnList: Array.isArray(obj.columnList) ? (obj.columnList as string[]) : null,
+  };
+}
+
 /** 数据源下拉（源 `getDataSourceList`） */
 export async function getDataSourceOptions(): Promise<DataSourceOption[]> {
   const res = await agentGet<unknown>('/agent/sys/dataSource/options');
   return pickList<DataSourceOption>(res);
 }
 
-/** 可选表列表（源 `getSyncTableList`） */
+/**
+ * 可选表列表（源 `getSyncTableList`）
+ *
+ * 支持按表名/表注释检索（源 `DataSourceCard.vue` 的「请输入表名」搜索框：
+ * `params.tableName = value; refresh()`）—— 后端 `TableListQueryReq` 有 `tableName` / `tableNote`，
+ * PG 分支用 `AND c.relname LIKE ?`（**百分号包裹 = 模糊匹配**）在**服务端**过滤，所以改动关键字要重新请求。
+ *
+ * 返回**完整 ListResult**（含 `totalCount`），供表列表分页显示「共 N 条」——
+ * 不能只取 list 长度：分页时每页只有 pageSize 条，长度当总数是错的。
+ */
 export async function getSyncTableList(params: {
   dataSourceId: string;
-  pageNo?: number;
+  /** 表名（模糊匹配，服务端过滤） */
+  tableName?: string;
+  /** 表注释（模糊匹配，服务端过滤） */
+  tableNote?: string;
+  /** ⚠️ 后端 `TableListQueryReq extends PageBaseParam`，分页字段是 **pageIndex**（不是 pageNo） */
+  pageIndex?: number;
   pageSize?: number;
-}): Promise<SyncTableRow[]> {
+}): Promise<AgentListResult<SyncTableRow>> {
   const res = await agentPost<unknown>('/agent/sys/dataSource/getSyncTableList', {
-    pageNo: 1,
-    pageSize: 200,
+    pageIndex: 1,
+    pageSize: 10,
     ...params,
   });
-  return pickList<SyncTableRow>(res);
+  return toListResult<SyncTableRow>(res);
 }
 
 /** 表字段元数据（用于生成 SQL 时参考字段名） */
@@ -91,15 +124,32 @@ export async function getSyncTabInfo(params: {
   return pickList<TabFieldRow>(res);
 }
 
+/** SQL 预览时的取数参数行（= 参数映射表格的行） */
+export interface SqlPreviewParam {
+  /** 参数名，后端用它在 SQL 里替换 `:name` 占位符 */
+  name?: string;
+  /** 参数默认值（非 null 才会参与替换） */
+  defaultValue?: unknown;
+  [key: string]: unknown;
+}
+
 /**
  * SQL 预览（源 `SqlPreviewModal` 用的接口）
  *
  * 入参字段名与源工程一致：`dataSourceId` / `sqlContent` / `sqlParam`。
+ *
+ * 🔴 `sqlParam` **必须是数组**（取数参数行），不能传空字符串：
+ * 后端 `DataSourceDataPreviewReq.sqlParam` 的类型是 `com.alibaba.fastjson.JSONArray`，
+ * 传 `''` 会让 Jackson 反序列化失败 → **HTTP 400**（2026-09-15 自测实测）。
+ * 之所以在源工程里没暴露：源前端 `SqlPreviewModal` 的 prop 类型虽写成 String，
+ * 但实际传的是 `paramsTableData` 数组（Vue 只告警不报错），且 Jeecg 侧用的是 fastjson 转换器、更宽容。
+ * 服务端消费方式（`SysDataSourceServiceImpl#sqlPreviewList`）：遍历数组取 `name` + `defaultValue`，
+ * 用 `defaultValue` 替换 SQL 里的 `:name`。
  */
 export async function sqlPreviewList(params: {
   dataSourceId: string;
   sqlContent: string;
-  sqlParam?: string;
+  sqlParam?: SqlPreviewParam[];
 }): Promise<SqlPreviewResult> {
   const res = await agentPost<unknown>('/agent/sys/dataSource/sqlPreviewList', params);
   return (res ?? {}) as SqlPreviewResult;

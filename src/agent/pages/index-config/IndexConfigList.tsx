@@ -44,6 +44,7 @@ import {
   queryGroupTree,
   refreshCache,
   updateGroup,
+  PARAM_TYPE_LABELS,
   type IndexGroupNode,
   type IndexParamRow,
 } from '../../api/indexConfig';
@@ -57,7 +58,7 @@ const COLUMNS: ColumnsType<IndexParamRow> = [
   { title: '指标ID', dataIndex: 'paramNo', width: 260, ellipsis: true },
   { title: '指标编号', dataIndex: 'paramID', width: 260, ellipsis: true },
   { title: '指标名称', dataIndex: 'paramName', width: 200, ellipsis: true },
-  { title: '指标类型', dataIndex: 'paramType', width: 120, align: 'center' },
+  { title: '指标类型', dataIndex: 'paramType', width: 120, align: 'center', render: (v: string) => PARAM_TYPE_LABELS[v] ?? v },
   { title: '数据源类型', dataIndex: 'scriptTypeDesc', width: 160, align: 'center' },
   { title: '数据源配置', dataIndex: 'indexSource', width: 120, align: 'center', ellipsis: true },
   { title: '创建用户', dataIndex: 'inputUserID', width: 160, align: 'center' },
@@ -166,22 +167,31 @@ export default function IndexConfigList() {
   /**
    * 查询条件 → 请求参数
    *
-   * 照抄源工程 `queryHandle`：选中分组时带 `parentParamNo/groupValue/groupName`，
-   * 未选中时不带（即查全部）。`filters: []` 是源工程固定传的空数组。
-   * 各筛选项只带非空值。
+   * 请求形状照抄源工程 `queryHandle`：带 `filters: []`；选中分组时带
+   * `parentParamNo/groupValue/groupName`，未选中即查全部；各筛选项只带非空值
+   * （**值**为空就不筛，但**键**必须留着）。
+   *
+   * 🔴 这里必须把「所有条件键」都显式写出来（空的写 `''`），不能像源工程那样"非空才写"：
+   *   `useAgentTable.refresh(next)` 是**合并**语义（`{...当前条件, ...next}`，见 useAgentTable.ts），
+   *   省略某个键 = 上一次的值原封不动留着 → **点了「重置」再查还是老条件**、取消选中分组后列表
+   *   仍按老分组过滤（2026-09-15 自测实测："重置条件后查询还是原来的检索数据"）。
+   *   空串到后端无副作用：`isNotEmpty('')`/`isNotBlank('')` 均为 false，条件不会进 SQL。
+   * 对照：`pages/rule/RuleList.tsx` 的 buildParams 一直是"全键写出"（空值给 undefined），所以它没这个问题。
    */
   const buildParams = useCallback(
     (group: IndexGroupNode | null, cond: FilterState): Record<string, unknown> => {
       const params: Record<string, unknown> = { filters: [] };
-      if (group) {
-        params.parentParamNo = group.groupId;
-        params.groupValue = group.groupValue;
-        params.groupName = group.groupName;
-      }
-      if (cond.paramNo) params.paramNo = cond.paramNo;
-      if (cond.paramId) params.paramID = cond.paramId;
-      if (cond.paramName) params.paramName = cond.paramName;
-      if (cond.indexSource) params.indexSource = cond.indexSource;
+      params.parentParamNo = group ? group.groupId : '';
+      params.groupValue = group ? group.groupValue : '';
+      params.groupName = group ? group.groupName : '';
+      params.paramNo = cond.paramNo || '';
+      // 🔴 请求字段名必须是 `paramId`（后端 IndexParamQueryReq 的字段），
+      // 不要照抄表格列/响应体的 `paramID`（那是实体 getter getParamID() 序列化出来的 key）。
+      // 写成 `paramID` 后端收不到 → 该条件被静默忽略 → 检索等于没筛（2026-09-15 自测踩过：
+      // 按指标编号 fxmdkjjye 查，返回的是未过滤的第一页，看着"查到很多"）。
+      params.paramId = cond.paramId || '';
+      params.paramName = cond.paramName || '';
+      params.indexSource = cond.indexSource || '';
       return params;
     },
     [],

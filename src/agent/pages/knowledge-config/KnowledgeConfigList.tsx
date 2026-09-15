@@ -142,18 +142,34 @@ export default function KnowledgeConfigList() {
   /**
    * 查询条件 → 请求参数
    *
-   * 照抄源 `queryHandle`：**只带非空项**（空值不传）。选中分组时带 `parentParamNo`，
-   * 未选中即查全部 —— 与源 `resetHandle` 里 `params.groupId = null` 的语义一致。
+   * 请求形状对齐源 `KnownList.vue`：`queryHandle` 里 `params = {...form}` 之后再
+   * **`params.groupId = props.groupId`**（选中分组）；`resetHandle` 则整体重建 `params = {}`。
+   *
+   * 🔴 两个必须写死的点（都是 2026-09-15 自测踩过的坑）：
+   *   1. **选中分组的字段名是 `groupId`**，不是 `parentParamNo` —— 后端 `KnowledgeBaseParamReq`
+   *      确实有 `groupId` / `parentGroupId` / `parentParamId`，**没有 `parentParamNo`**；
+   *      写成 `parentParamNo` 后端静默收不到 → 点分组后列表还是全部数据。
+   *      另外 `parentGroupId` 要一起带上：后端 `pageKnowledgeBaseParamsList` 里
+   *      「选中的是名为『全部』的节点 → 改用它的 `parentGroupId`」这段逻辑依赖它。
+   *   2. **所有条件键都要显式写出**（空的写 `''`），不能"非空才写"：
+   *      `useAgentTable.refresh(next)` 是**合并**语义（`{...当前条件, ...next}`，见 useAgentTable.ts），
+   *      省略键 = 旧值残留 → **点「重置」再查还是老条件**。空串到后端无副作用
+   *      （`isNotEmpty('')` 为 false，条件不进 SQL）。
+   * 对照：`pages/rule/RuleList.tsx` 的 buildParams 一直是"全键写出"，所以它没这两个问题。
    */
-  const buildParams = useCallback((groupId: string, cond: FilterState): Record<string, unknown> => {
-    const params: Record<string, unknown> = {};
-    if (groupId) params.parentParamNo = groupId;
-    if (cond.paramNo) params.paramNo = cond.paramNo;
-    if (cond.paramName) params.paramName = cond.paramName;
-    if (cond.paramStatus) params.paramStatus = cond.paramStatus;
-    if (cond.online) params.online = cond.online;
-    return params;
-  }, []);
+  const buildParams = useCallback(
+    (groupId: string, cond: FilterState, group?: KnowledgeGroupNode | null): Record<string, unknown> => {
+      return {
+        groupId: groupId || '',
+        parentGroupId: group?.parentGroupId || '',
+        paramNo: cond.paramNo || '',
+        paramName: cond.paramName || '',
+        paramStatus: cond.paramStatus || '',
+        online: cond.online || '',
+      };
+    },
+    [],
+  );
 
   useEffect(() => {
     void loadTree();
@@ -164,7 +180,7 @@ export default function KnowledgeConfigList() {
 
   // 首屏 + 切换分组都走这里（hook 的 immediate 已关掉，保证只查一次）
   useEffect(() => {
-    void refresh(buildParams(selectedGroupId, filter));
+    void refresh(buildParams(selectedGroupId, filter, selectedGroup));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedGroupId]);
 
@@ -274,11 +290,11 @@ export default function KnowledgeConfigList() {
     return String(rowKeys[0]);
   };
 
-  const doQuery = () => void refresh(buildParams(selectedGroupId, filter));
+  const doQuery = () => void refresh(buildParams(selectedGroupId, filter, selectedGroup));
 
   const doReset = () => {
     setFilter(EMPTY_FILTER);
-    void refresh(buildParams(selectedGroupId, EMPTY_FILTER));
+    void refresh(buildParams(selectedGroupId, EMPTY_FILTER, selectedGroup));
   };
 
   const doDelete = async () => {

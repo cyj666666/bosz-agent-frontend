@@ -70,3 +70,13 @@ body {
 }
 .page-fill .ant-tabs-content { flex: 1; min-height: 0; }
 .page-fill .ant-tabs-tabpane { height: 100%; display: flex; flex-direction: column; }
+
+/* =============================================================================
+ * 表列表「点击整行 = 生成 select * from 表名」
+ * ---------------------------------------------------------------------------
+ * 对齐源工程 `views/index/DataSourceCard.vue` 的 `customRow`（点击行 → 填 SQL），
+ * 源工程表列表只有「表名」一列、没有操作按钮，靠光标提示可点。
+ * 用在 `pages/index-config/IndexDataSourceCard.tsx` 的表列表上。
+ * ========================================================================== */
+.agent-table-row-clickable { cursor: pointer; }
+

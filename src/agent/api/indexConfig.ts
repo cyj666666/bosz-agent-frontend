@@ -137,6 +137,29 @@ export function intfSync(params: Record<string, unknown>): Promise<unknown> {
 
 /* ---------------- 类型 ---------------- */
 
+/**
+ * 指标类型候选值（**唯一真源**：`IndexEditorModal` 的下拉与 `IndexConfigList` 的列表列都从这里取）
+ *
+ * 值与文案照抄源工程 `views/index/EditorModal.vue:387` 的 `paramTypeOptions`。
+ * ⚠️ 后端的列表接口**只回原始值**（`CHAR`/`LIST`/`NUMBER`/`OBJECT`，没有 `paramTypeDesc` 之类的中文字段），
+ *    源工程那张表的「指标类型」列也是直接显示英文；本工程按用户要求映射成中文显示。
+ */
+export const PARAM_TYPE_OPTIONS = [
+  { value: 'CHAR', label: '字符' },
+  { value: 'LIST', label: '列表' },
+  { value: 'NUMBER', label: '数值' },
+  { value: 'OBJECT', label: '对象' },
+];
+
+/** 值 → 中文（未知值原样返回，避免把 `GROUP` 之类非表单值显示成空） */
+export const PARAM_TYPE_LABELS: Record<string, string> = PARAM_TYPE_OPTIONS.reduce<Record<string, string>>(
+  (acc, o) => {
+    acc[o.value] = o.label;
+    return acc;
+  },
+  {},
+);
+
 /** 分组树节点（字段来自源工程，见 ConfigList.vue 的 getTreeData） */
 export interface IndexGroupNode {
   groupId: string;

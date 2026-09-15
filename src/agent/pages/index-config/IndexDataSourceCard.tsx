@@ -76,7 +76,8 @@ import {
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { dataPreviewList, getDataSourceOptions, getSyncTableList, sqlPreviewList } from '../../api/dataSourceAgent';
+import { getDataSourceOptions, getSyncTableList, sqlPreviewList } from '../../api/dataSourceAgent';
+import { useAgentTable } from '../../components/useAgentTable';
 import type { DataSourceOption, SqlPreviewResult, SyncTableRow } from '../../api/dataSourceAgent';
 import { previewKnowledgeCode, queryGroupTree, queryKnowledgeCodeOptions } from '../../api/knowledgeConfig';
 import type { KnowledgeCodeOption, KnowledgeGroupNode } from '../../api/knowledgeConfig';
@@ -262,8 +263,28 @@ export function IndexDataSourceCard({
   const kbTopLevelNamesRef = useRef<string[]>([]);
 
   const [dataSources, setDataSources] = useState<DataSourceOption[]>([]);
-  const [tables, setTables] = useState<SyncTableRow[]>([]);
-  const [tablesLoading, setTablesLoading] = useState(false);
+  /**
+   * 表列表 —— 用通用分页 hook（**服务端分页**，与源工程该表格的 `useAntdTable` 同形）：
+   *   · 分页器自带「共 N 条」（`totalCount` 来自后端 ListResult，不是当页条数）；
+   *   · 关键字检索同样是**服务端模糊过滤**（后端 `LIKE 百分号关键字`）→ 每次改关键字都要重查；
+   *   · hook 里带了"过期响应丢弃"，快速敲字/翻页不会出现"结果和关键字对不上"。
+   */
+  const {
+    rows: tables,
+    loading: tablesLoading,
+    pagination: tablesPagination,
+    refresh: refreshTables,
+    setRows: setTableRows,
+  } = useAgentTable<SyncTableRow, { dataSourceId: string; tableName: string }>(getSyncTableList, {
+    immediate: false,
+    errorText: '表列表加载失败',
+  });
+  /** 表名检索框的值（源 `a-input-search placeholder="请输入表名"` + `params.tableName`） */
+  const [tableKeyword, setTableKeyword] = useState('');
+  /** 供 `loadTables` 读取最新关键字（它是 useCallback，直接闭包会拿到旧值） */
+  const tableKeywordRef = useRef('');
+  /** 输入即搜的防抖计时器 */
+  const searchTimerRef = useRef<number | null>(null);
   const [groupOptions, setGroupOptions] = useState<KnowledgeGroupNode[]>([]);
   /** 全部「在线且启用」的知识库（**不按分组过滤**，源工程也是全量拉下来前端过滤） */
   const [knowledgeOptions, setKnowledgeOptions] = useState<KnowledgeCodeOption[]>([]);
@@ -369,33 +390,73 @@ export function IndexDataSourceCard({
   }, [scriptType]);
 
   /** 选了数据源就拉表列表（源 `dataSourceChangeHandle`） */
+  /**
+   * 加载表列表（服务端分页 + 服务端模糊过滤）
+   *
+   * @param dsId    数据源 id（为空则清空列表，不发注定返回 null 的请求）
+   * @param keyword 表名关键字；不传则沿用检索框里的（**切换数据源时源工程也保留关键字**：
+   *                `dataSourceChangeHandle` 只改 `params.dataSourceId` 后 refresh）
+   */
   const loadTables = useCallback(
-    async (dsId: string) => {
+    async (dsId: string, keyword?: string) => {
+      const kw = keyword ?? tableKeywordRef.current;
       if (!dsId) {
-        setTables([]);
+        setTableRows([]);
         return;
       }
-      setTablesLoading(true);
-      try {
-        setTables(await getSyncTableList({ dataSourceId: dsId }));
-      } catch (err) {
-        setTables([]);
-        message.error(err instanceof Error ? err.message : '表列表加载失败');
-      } finally {
-        setTablesLoading(false);
-      }
+      await refreshTables({ dataSourceId: dsId, tableName: kw });
+    },
+    [refreshTables, setTableRows],
+  );
+
+  /** 回车 / 点放大镜：立即按关键字重查（顺带取消防抖，避免重复请求） */
+  const onTableSearch = (value: string) => {
+    if (searchTimerRef.current) window.clearTimeout(searchTimerRef.current);
+    tableKeywordRef.current = value;
+    setTableKeyword(value);
+    void loadTables(dataSourceId, value);
+  };
+
+  /**
+   * 输入即搜（模糊过滤）：400ms 防抖后按新关键字重查
+   *
+   * 源工程只认 `@search`（回车/点按钮才查）；用户要求"支持模糊检索"，这里做成了边输边筛。
+   * 清空输入框（点 X 或删完）会立刻按空关键字查一次，恢复全量。
+   */
+  const onKeywordChange = (next: string) => {
+    setTableKeyword(next);
+    if (searchTimerRef.current) window.clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = window.setTimeout(
+      () => {
+        tableKeywordRef.current = next;
+        void loadTables(dataSourceId, next);
+      },
+      next ? 400 : 0,
+    );
+  };
+
+  useEffect(() => {
+    // 切换类型/数据源都要重拉表；数据源为空时 loadTables 会清空列表
+    if (scriptType === 'Sql') void loadTables(dataSourceId);
+    // 仅在类型/数据源变化时重新拉表（关键字变化走 onKeywordChange 的防抖）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scriptType, dataSourceId]);
+
+  /** 卸载时清掉未触发的防抖计时器 */
+  useEffect(
+    () => () => {
+      if (searchTimerRef.current) window.clearTimeout(searchTimerRef.current);
     },
     [],
   );
 
-  useEffect(() => {
-    if (scriptType === 'Sql' && dataSourceId) void loadTables(dataSourceId);
-    // 仅在类型/数据源变化时重新拉表
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scriptType, dataSourceId]);
-
-  /** 选中一张表 → 生成 `select * from 表名`（源工程同做法） */
+  /**
+   * 选中一张表 → 生成 `select * from 表名`（源 `customRow`：**点击整行**触发，无提示）
+   *
+   * 源工程没有「用作查询」按钮，就是点行直接填 SQL；本工程由下方 Table 的 `onRow.onClick` 调用。
+   */
   const pickTable = (row: SyncTableRow) => {
+    if (disabled) return;
     const name = String(row.tableName ?? '');
     if (!name) return;
     const nextSql = `select * from ${name}`;
@@ -588,7 +649,9 @@ export function IndexDataSourceCard({
     setPreviewLoading(true);
     setPreviewResult({});
     try {
-      const res = await sqlPreviewList({ dataSourceId, sqlContent: sqlStr, sqlParam: '' });
+      // 🔴 sqlParam 必须传「取数参数行数组」（源工程传的也是参数表 `paramsTableData`）：
+      //    后端 DTO 是 JSONArray，传空字符串会让 Jackson 反序列化失败 → HTTP 400。
+      const res = await sqlPreviewList({ dataSourceId, sqlContent: sqlStr, sqlParam: paramsRows });
       setPreviewResult(res);
       if (!res?.tableHeaders?.length) {
         // 空结果不是错误（源工程也没提示），但用户会以为坏了，这里给个明确说明
@@ -601,36 +664,21 @@ export function IndexDataSourceCard({
     }
   };
 
-  /** 按表名直接预览（不走 SQL 编辑，源工程另有一条 dataPreviewList 路径） */
-  const doTablePreview = async (row: SyncTableRow) => {
-    const name = String(row.tableName ?? '');
-    if (!name) return;
-    setPreviewOpen(true);
-    setPreviewLoading(true);
-    setPreviewResult({});
-    try {
-      setPreviewResult(await dataPreviewList({ dataSourceId, tableName: name }));
-    } catch (err) {
-      message.error(err instanceof Error ? err.message : '预览失败');
-    } finally {
-      setPreviewLoading(false);
-    }
-  };
+  /* 说明：原先这里还有一个「按表名直接预览」（调 `dataPreviewList`）的行内按钮 —— 已删除。
+     源工程 `DataSourceCard.vue` 没有这个入口，`dataPreviewList` 只被
+     `views/DataSourceManager/TableIntroduce/TableDataModal.vue`（数据源管理 → 表说明）使用；
+     指标配置里的「数据预览」就是执行 SQL 文本框里的 SQL（本组件的「执行预览」按钮）。 */
 
-  const tableColumns: ColumnsType<SyncTableRow> = [
-    { title: '表名', dataIndex: 'tableName', width: 320, ellipsis: true },
-    { title: '表说明', dataIndex: 'tableComment', ellipsis: true },
-    {
-      title: '操作',
-      width: 170,
-      render: (_t, row) => (
-        <Space>
-          <a onClick={() => pickTable(row)}>用作查询</a>
-          <a onClick={() => void doTablePreview(row)}>预览数据</a>
-        </Space>
-      ),
-    },
-  ];
+  /**
+   * 表列表列 —— **源工程只有「表名」一列**（`DataSourceCard.vue:494` 的 `columns = [{title:'表名'}]`），
+   * 且**没有操作列/行内按钮**：
+   *   · 「用作查询」= 源 `customRow` 的**点击整行** → `sqlStr = 'select * from ' + tableName`；
+   *   · 「数据预览」= 右侧工具栏按钮（本组件即「执行预览」），执行的是 SQL 文本框里的 SQL。
+   * 本工程原先自创了「操作」列（用作查询 / 预览数据 两个 `<a>`）—— 已按源工程去掉：
+   *   行内按钮既不是源行为，`dataPreviewList`（按表名预览）在源工程里也只被
+   *   `views/DataSourceManager/TableIntroduce/TableDataModal.vue`（数据源管理→表说明）使用，与指标配置无关。
+   */
+  const tableColumns: ColumnsType<SyncTableRow> = [{ title: '表名', dataIndex: 'tableName', ellipsis: true }];
 
   /** 预览结果的列（源工程按 `tableHeaders` 动态生成） */
   const previewColumns: ColumnsType<Record<string, unknown>> = (previewResult.tableHeaders ?? []).map((h) => ({
@@ -691,21 +739,37 @@ export function IndexDataSourceCard({
               }}
             />
           </Space>
+          {/* 表名检索（源 `a-input-search`：`enter-button` + `allowClear`；
+              本工程加了**输入即搜**：400ms 防抖后按新关键字重查） */}
+          <Input.Search
+            allowClear
+            enterButton
+            disabled={disabled}
+            placeholder="请输入表名"
+            style={{ width: '100%', marginBottom: 8 }}
+            value={tableKeyword}
+            onChange={(e) => onKeywordChange(e.target.value)}
+            onSearch={onTableSearch}
+          />
           <Table<SyncTableRow>
             rowKey={(row) => String(row.tableName ?? Math.random())}
             size="small"
             loading={tablesLoading}
             columns={tableColumns}
             dataSource={tables}
-            pagination={{ pageSize: 8, size: 'small' }}
+            /* 服务端分页：分页器自带「共 N 条」（totalCount 来自后端） */
+            pagination={tablesPagination}
             scroll={{ y: 220 }}
+            /* 源工程是「点击整行即生成 select * from 表名」 */
+            onRow={(row) => ({ onClick: () => pickTable(row) })}
+            rowClassName={() => (disabled ? '' : 'agent-table-row-clickable')}
             locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请先选择数据源" /> }}
           />
           <div style={{ marginTop: 8, marginBottom: 4 }}>SQL 脚本</div>
           <Input.TextArea
             rows={5}
             disabled={disabled}
-            placeholder="可直接写 SQL，或从上方表格点「用作查询」自动生成"
+            placeholder="可直接写 SQL，或点击上方表名自动生成「select * from 表名」"
             value={sqlStr}
             onChange={(e) => {
               setSqlStr(e.target.value);
