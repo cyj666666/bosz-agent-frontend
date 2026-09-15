@@ -1,16 +1,728 @@
 /**
- * 指标配置 — 页面入口（骨架）
+ * 指标配置 — 主页面
  *
- * 对应原 amar-agent-admin 的 views/index/ConfigList.vue。
- * 待实现：左侧分组树 + 右侧指标表格 + 新增/配置/复制/移动/删除/快速引入/关联校验/批量同步/刷新缓存。
+ * 对应源工程 `amar-agent-admin/src/views/index/ConfigList.vue`（842 行）。
+ * 结构逐项对齐：左栏分组树（4 个分组操作）+ 右栏筛选/操作按钮组/指标表格（10 列 + 多选）。
+ *
+ * **与源工程的差异（刻意，均已在下方注释标注）**：
+ *   1) 结果判断：源工程判 `res.success`；本工程由 agentRequest 统一校验 code 并解包到 data，
+ *      所以这里只写 try/catch。
+ *   2) 源工程的 `FilterForm` 是宿主的通用筛选组件、`useAntdTable` 是宿主的表格 hooks，
+ *      本模块**不复用宿主组件**（保持 `src/agent` 自包含），改用受控 state + 原生 Table 分页。
+ *   3) 「复制 / 移动 / 快速引入」在源工程是三个独立弹窗组件（各 100-210 行），
+ *      这里做成**一个通用的"选择目标分组"弹窗** + 快速引入的**基础版**（多选指标引入当前分组）。
+ *   4) 「关联校验」= **完整实现**：源 relateCheck() 只校验「必须选中一行」，随后打开
+ *      「关联信息」弹窗（源 IndexRelateInfoTab），明细由「知识库 / 指标」两个页签各自加载。
  */
-import AgentPlaceholder from '../../components/AgentPlaceholder';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import {
+  Button,
+  Card,
+  Col,
+  Form,
+  Input,
+  Modal,
+  Popconfirm,
+  Row,
+  Space,
+  Table,
+  Tree,
+  message,
+} from 'antd';
+import type { ColumnsType } from 'antd/es/table';
+import type { Key } from 'react';
+import {
+  addConfigGroup,
+  addGroup,
+  copyIndex,
+  deleteGroup,
+  deleteIndex,
+  intfSync,
+  moveIndex,
+  queryAllList,
+  queryGroupTree,
+  refreshCache,
+  updateGroup,
+  type IndexGroupNode,
+  type IndexParamRow,
+} from '../../api/indexConfig';
+import { IndexRelateInfoModal } from './IndexRelateInfoModal';
+import IndexEditorModal from './IndexEditorModal';
+
+/** 表格列（照抄源工程 views/index/tableColumns.json） */
+const COLUMNS: ColumnsType<IndexParamRow> = [
+  { title: '指标ID', dataIndex: 'paramNo', width: 260, ellipsis: true },
+  { title: '指标编号', dataIndex: 'paramID', width: 260, ellipsis: true },
+  { title: '指标名称', dataIndex: 'paramName', width: 200, ellipsis: true },
+  { title: '指标类型', dataIndex: 'paramType', width: 120, align: 'center' },
+  { title: '数据源类型', dataIndex: 'scriptTypeDesc', width: 160, align: 'center' },
+  { title: '数据源配置', dataIndex: 'indexSource', width: 120, align: 'center', ellipsis: true },
+  { title: '创建用户', dataIndex: 'inputUserID', width: 160, align: 'center' },
+  { title: '创建时间', dataIndex: 'inputTime', width: 160, align: 'center' },
+  { title: '更新用户', dataIndex: 'updateUserID', width: 160, align: 'center' },
+  { title: '更新时间', dataIndex: 'updateTime', width: 160, align: 'center' },
+];
+
+interface FilterState {
+  paramNo: string;
+  paramId: string;
+  paramName: string;
+  indexSource: string;
+}
+
+const EMPTY_FILTER: FilterState = { paramNo: '', paramId: '', paramName: '', indexSource: '' };
 
 export default function IndexConfigList() {
+  /* ---------------- 分组树 ---------------- */
+  const [tree, setTree] = useState<IndexGroupNode[]>([]);
+  const [treeLoading, setTreeLoading] = useState(false);
+  const [selectedGroup, setSelectedGroup] = useState<IndexGroupNode | null>(null);
+  const [selectedKeys, setSelectedKeys] = useState<Key[]>([]);
+
+  /* ---------------- 指标列表 ---------------- */
+  const [rows, setRows] = useState<IndexParamRow[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [pageIndex, setPageIndex] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [filter, setFilter] = useState<FilterState>(EMPTY_FILTER);
+  const [rowKeys, setRowKeys] = useState<Key[]>([]);
+
+  /* ---------------- 弹窗 ---------------- */
+  const [groupModal, setGroupModal] = useState<{ open: boolean; mode: 'add' | 'addChild' | 'edit'; node?: IndexGroupNode }>({
+    open: false,
+    mode: 'add',
+  });
+  const [groupForm, setGroupForm] = useState({ groupName: '', groupValue: '' });
+  const [groupSaving, setGroupSaving] = useState(false);
+
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editorType, setEditorType] = useState<'add' | 'config'>('add');
+  const [editorRow, setEditorRow] = useState<IndexParamRow | null>(null);
+
+  /** 选择目标分组（复制/移动共用） */
+  const [targetModal, setTargetModal] = useState<{ open: boolean; mode: 'copy' | 'move' }>({ open: false, mode: 'copy' });
+  const [targetGroup, setTargetGroup] = useState<IndexGroupNode | null>(null);
+
+  /**
+   * 「关联信息」弹窗（源 IndexRelateInfoTab）
+   *
+   * 用「选中的行」而不是 boolean 表示开关：弹窗里两个页签都要拿 curParam.paramNo 取数，
+   * 没有选中行时不该进渲染。
+   */
+  const [relateParam, setRelateParam] = useState<IndexParamRow | null>(null);
+
+  /** 读路由 query（用于从「关联信息」弹窗跳转过来时定位分组） */
+  const [searchParams] = useSearchParams();
+
+  /** 快速引入 */
+  const [importModal, setImportModal] = useState(false);
+  const [importRows, setImportRows] = useState<IndexParamRow[]>([]);
+  const [importKeys, setImportKeys] = useState<Key[]>([]);
+  const [importLoading, setImportLoading] = useState(false);
+
+  /* ---------------- 加载 ---------------- */
+
+  /** 树节点转 antd Tree 结构（源工程用 replaceFields 映射 groupName/groupId） */
+  const toTreeData = useCallback(
+    (nodes: IndexGroupNode[]): { key: string; title: string; children?: unknown[] }[] =>
+      nodes.map((n) => ({
+        key: n.groupId,
+        title: n.groupName,
+        children: n.children?.length ? toTreeData(n.children) : undefined,
+      })),
+    [],
+  );
+
+  /** 查找分组节点（用于选中回填） */
+  const findGroup = useCallback((nodes: IndexGroupNode[], groupId: string): IndexGroupNode | null => {
+    for (const n of nodes) {
+      if (n.groupId === groupId) return n;
+      if (n.children?.length) {
+        const hit = findGroup(n.children, groupId);
+        if (hit) return hit;
+      }
+    }
+    return null;
+  }, []);
+
+  const loadTree = useCallback(async () => {
+    setTreeLoading(true);
+    try {
+      const res = await queryGroupTree();
+      setTree(res?.list ?? []);
+    } catch (e) {
+      message.error((e as Error)?.message || '分组树加载失败');
+      setTree([]);
+    } finally {
+      setTreeLoading(false);
+    }
+  }, []);
+
+  /**
+   * 拉指标列表
+   *
+   * 入参照抄源工程 `queryHandle`：选中分组时带 `parentParamNo/groupValue/groupName`，
+   * 未选中时不带（即查全部）。`filters: []` 是源工程固定传的空数组。
+   */
+  const loadList = useCallback(
+    async (page: number, size: number, group: IndexGroupNode | null, cond: FilterState) => {
+      setLoading(true);
+      try {
+        const params: Record<string, unknown> = {
+          filters: [],
+          pageIndex: page,
+          pageSize: size,
+        };
+        if (group) {
+          params.parentParamNo = group.groupId;
+          params.groupValue = group.groupValue;
+          params.groupName = group.groupName;
+        }
+        if (cond.paramNo) params.paramNo = cond.paramNo;
+        if (cond.paramId) params.paramID = cond.paramId;
+        if (cond.paramName) params.paramName = cond.paramName;
+        if (cond.indexSource) params.indexSource = cond.indexSource;
+
+        const res = await queryAllList(params);
+        setRows(res?.list ?? []);
+        setTotal(res?.totalCount ?? 0);
+      } catch (e) {
+        message.error((e as Error)?.message || '指标列表加载失败');
+        setRows([]);
+        setTotal(0);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    void loadTree();
+  }, [loadTree]);
+
+  useEffect(() => {
+    void loadList(pageIndex, pageSize, selectedGroup, filter);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageIndex, pageSize, selectedGroup]);
+
+  /**
+   * 从「关联信息」弹窗跳转过来时自动定位分组（?groupId=xxx）
+   *
+   * 源工程用 router.push 带 query 实现（path=/index/list, query={groupId}）；
+   * 本工程对应路由是 agent/index-config，读同名参数即可。
+   * 依赖 tree：树加载完才能把 groupId 还原成分组节点。
+   */
+  useEffect(() => {
+    const groupId = searchParams.get('groupId');
+    if (!groupId || !tree.length) return;
+    const node = findGroup(tree, groupId);
+    if (!node) return;
+    setSelectedKeys([groupId]);
+    setSelectedGroup(node);
+    setRowKeys([]);
+    setPageIndex(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, tree]);
+
+  /* ---------------- 树交互 ---------------- */
+
+  /** 点击已选中的节点＝取消选中（源工程行为），取消后列表查全部 */
+  const onTreeSelect = (keys: Key[]) => {
+    if (!keys.length || String(keys[0]) === String(selectedKeys[0])) {
+      setSelectedKeys([]);
+      setSelectedGroup(null);
+      setRowKeys([]);
+      setPageIndex(1);
+      return;
+    }
+    const node = findGroup(tree, String(keys[0]));
+    setSelectedKeys(keys);
+    setSelectedGroup(node);
+    setRowKeys([]);
+    setPageIndex(1);
+  };
+
+  const openGroupModal = (mode: 'add' | 'addChild' | 'edit') => {
+    if ((mode === 'addChild' || mode === 'edit') && !selectedGroup) {
+      message.warning('请先在左侧选择一个分组');
+      return;
+    }
+    setGroupForm({
+      groupName: mode === 'edit' ? selectedGroup?.groupName ?? '' : '',
+      groupValue: mode === 'edit' ? selectedGroup?.groupValue ?? '' : '',
+    });
+    setGroupModal({ open: true, mode, node: selectedGroup ?? undefined });
+  };
+
+  const doSaveGroup = async () => {
+    if (!groupForm.groupName.trim()) {
+      message.warning('请输入分组名称');
+      return;
+    }
+    setGroupSaving(true);
+    try {
+      const { mode, node } = groupModal;
+      if (mode === 'add') {
+        await addGroup({ groupName: groupForm.groupName, groupValue: groupForm.groupValue });
+      } else if (mode === 'addChild') {
+        // 新增下级：挂在当前选中节点下
+        await addConfigGroup({
+          parentParamNo: node?.groupId,
+          groupName: groupForm.groupName,
+          groupValue: groupForm.groupValue,
+        });
+      } else {
+        await updateGroup({
+          groupId: node?.groupId,
+          groupName: groupForm.groupName,
+          groupValue: groupForm.groupValue,
+        });
+      }
+      message.success('保存成功');
+      setGroupModal((s) => ({ ...s, open: false }));
+      await loadTree();
+    } catch (e) {
+      message.error((e as Error)?.message || '保存失败');
+    } finally {
+      setGroupSaving(false);
+    }
+  };
+
+  const doDeleteGroup = async () => {
+    if (!selectedGroup) {
+      message.warning('请先在左侧选择一个分组');
+      return;
+    }
+    try {
+      await deleteGroup({ groupId: selectedGroup.groupId });
+      message.success('删除成功');
+      setSelectedGroup(null);
+      setSelectedKeys([]);
+      await loadTree();
+    } catch (e) {
+      message.error((e as Error)?.message || '删除失败');
+    }
+  };
+
+  /* ---------------- 列表操作 ---------------- */
+
+  const doQuery = () => {
+    setPageIndex(1);
+    void loadList(1, pageSize, selectedGroup, filter);
+  };
+
+  const doReset = () => {
+    setFilter(EMPTY_FILTER);
+    setPageIndex(1);
+    void loadList(1, pageSize, selectedGroup, EMPTY_FILTER);
+  };
+
+  const requireOne = (): string | null => {
+    if (!rowKeys.length) {
+      message.warning('请先选择一条指标');
+      return null;
+    }
+    return String(rowKeys[0]);
+  };
+
+  const doDelete = async () => {
+    const paramNo = requireOne();
+    if (!paramNo) return;
+    try {
+      await deleteIndex({ paramNo });
+      message.success('删除成功');
+      setRowKeys([]);
+      void loadList(pageIndex, pageSize, selectedGroup, filter);
+    } catch (e) {
+      message.error((e as Error)?.message || '删除失败');
+    }
+  };
+
+  const openTargetModal = (mode: 'copy' | 'move') => {
+    const paramNo = requireOne();
+    if (!paramNo) return;
+    setTargetGroup(null);
+    setTargetModal({ open: true, mode });
+  };
+
+  const doTargetConfirm = async () => {
+    const paramNo = requireOne();
+    if (!paramNo) return;
+    if (!targetGroup) {
+      message.warning('请选择目标分组');
+      return;
+    }
+    try {
+      const payload = { paramNo, parentParamNo: targetGroup.groupId, groupValue: targetGroup.groupValue, groupName: targetGroup.groupName };
+      if (targetModal.mode === 'copy') await copyIndex(payload);
+      else await moveIndex(payload);
+      message.success(targetModal.mode === 'copy' ? '复制成功' : '移动成功');
+      setTargetModal((s) => ({ ...s, open: false }));
+      setRowKeys([]);
+      void loadList(pageIndex, pageSize, selectedGroup, filter);
+    } catch (e) {
+      message.error((e as Error)?.message || '操作失败');
+    }
+  };
+
+  const doRefreshCache = async () => {
+    try {
+      await refreshCache();
+      message.success('刷新成功！');
+    } catch (e) {
+      message.error((e as Error)?.message || '刷新失败');
+    }
+  };
+
+  const doBatchSync = async () => {
+    if (!rowKeys.length) {
+      message.warning('请选择要同步的指标');
+      return;
+    }
+    try {
+      await intfSync({ syncType: 'index', syncIdList: rowKeys.map(String) });
+      message.success('批量同步任务发起成功！');
+    } catch (e) {
+      message.error((e as Error)?.message || '同步失败');
+    }
+  };
+
+  /**
+   * 关联校验
+   *
+   * 与源工程 relateCheck() 完全一致：**只校验「必须选中一行」，然后打开「关联信息」弹窗**，
+   * 明细交给弹窗里「知识库 / 指标」两个页签各自调接口加载 ——
+   * 源工程也不是在这里发请求（它只置 relateInfoVisible = true）。
+   */
+  const doRelateCheck = () => {
+    const paramNo = requireOne();
+    if (!paramNo) return;
+    setRelateParam(rows.find((r) => String(r.paramNo) === paramNo) ?? null);
+  };
+
+  /** 业务指标快速引入（基础版）：从全部指标里多选后引入当前分组 */
+  const openImport = async () => {
+    if (!selectedGroup) {
+      message.warning('请先在左侧选择要引入到的分组');
+      return;
+    }
+    setImportModal(true);
+    setImportLoading(true);
+    try {
+      const res = await queryAllList({ filters: [], pageIndex: 1, pageSize: 500 });
+      setImportRows(res?.list ?? []);
+      setImportKeys([]);
+    } catch (e) {
+      message.error((e as Error)?.message || '指标加载失败');
+      setImportRows([]);
+    } finally {
+      setImportLoading(false);
+    }
+  };
+
+  const doImportConfirm = async () => {
+    if (!importKeys.length) {
+      message.warning('请选择要引入的指标');
+      return;
+    }
+    setImportLoading(true);
+    try {
+      for (const k of importKeys) {
+        await copyIndex({
+          paramNo: String(k),
+          parentParamNo: selectedGroup?.groupId,
+          groupValue: selectedGroup?.groupValue,
+          groupName: selectedGroup?.groupName,
+        });
+      }
+      message.success(`已引入 ${importKeys.length} 个指标`);
+      setImportModal(false);
+      void loadList(pageIndex, pageSize, selectedGroup, filter);
+    } catch (e) {
+      message.error((e as Error)?.message || '引入失败');
+    } finally {
+      setImportLoading(false);
+    }
+  };
+
+  const treeData = useMemo(() => toTreeData(tree), [tree, toTreeData]);
+
   return (
-    <AgentPlaceholder
-      title="指标配置"
-      note="骨架占位。待实现：分组树、指标 CRUD、数据源配置（Sql/Api/参数集/知识库四选一）、关联校验、批量同步。"
-    />
+    <div style={{ padding: 16 }}>
+      <Row gutter={12}>
+        {/* 左：分组树 */}
+        <Col span={5}>
+          <Card
+            title={
+              <Space size={6} wrap>
+                <Button size="small" type="primary" onClick={() => openGroupModal('add')}>
+                  添加分组
+                </Button>
+                <Button size="small" onClick={() => openGroupModal('addChild')}>
+                  添加下级
+                </Button>
+                <Button size="small" onClick={() => openGroupModal('edit')}>
+                  编辑
+                </Button>
+                <Popconfirm title="确定删除该分组吗？" okText="确定" cancelText="取消" onConfirm={() => void doDeleteGroup()}>
+                  <Button size="small" danger>
+                    删除
+                  </Button>
+                </Popconfirm>
+              </Space>
+            }
+            styles={{ body: { minHeight: 420, maxHeight: 620, overflow: 'auto' } }}
+          >
+            {treeData.length ? (
+              <Tree
+                treeData={treeData as never}
+                selectedKeys={selectedKeys}
+                defaultExpandAll
+                onSelect={onTreeSelect}
+              />
+            ) : (
+              <div style={{ color: '#8c8c8c', textAlign: 'center', paddingTop: 40 }}>
+                {treeLoading ? '加载中…' : '暂无分组数据'}
+              </div>
+            )}
+          </Card>
+        </Col>
+
+        {/* 右：指标列表 */}
+        <Col span={19}>
+          <Card styles={{ body: { padding: 16 } }}>
+            <Form layout="inline" style={{ rowGap: 12, marginBottom: 12 }}>
+              <Form.Item label="指标ID">
+                <Input
+                  allowClear
+                  placeholder="请输入指标ID"
+                  style={{ width: 180 }}
+                  value={filter.paramNo}
+                  onChange={(e) => setFilter((p) => ({ ...p, paramNo: e.target.value }))}
+                  onPressEnter={doQuery}
+                />
+              </Form.Item>
+              <Form.Item label="指标编号">
+                <Input
+                  allowClear
+                  placeholder="请输入指标编号"
+                  style={{ width: 180 }}
+                  value={filter.paramId}
+                  onChange={(e) => setFilter((p) => ({ ...p, paramId: e.target.value }))}
+                  onPressEnter={doQuery}
+                />
+              </Form.Item>
+              <Form.Item label="指标名称">
+                <Input
+                  allowClear
+                  placeholder="请输入指标名称"
+                  style={{ width: 180 }}
+                  value={filter.paramName}
+                  onChange={(e) => setFilter((p) => ({ ...p, paramName: e.target.value }))}
+                  onPressEnter={doQuery}
+                />
+              </Form.Item>
+              <Form.Item label="数据来源">
+                <Input
+                  allowClear
+                  placeholder="请输入数据来源"
+                  style={{ width: 180 }}
+                  value={filter.indexSource}
+                  onChange={(e) => setFilter((p) => ({ ...p, indexSource: e.target.value }))}
+                  onPressEnter={doQuery}
+                />
+              </Form.Item>
+              <Form.Item>
+                <Space>
+                  <Button type="primary" onClick={doQuery}>
+                    查询
+                  </Button>
+                  <Button onClick={doReset}>重置</Button>
+                </Space>
+              </Form.Item>
+            </Form>
+
+            <Space size={8} wrap style={{ marginBottom: 12 }}>
+              <Button
+                type="primary"
+                onClick={() => {
+                  setEditorType('add');
+                  setEditorRow(null);
+                  setEditorOpen(true);
+                }}
+              >
+                新增
+              </Button>
+              <Button
+                type="primary"
+                onClick={() => {
+                  const paramNo = requireOne();
+                  if (!paramNo) return;
+                  setEditorType('config');
+                  setEditorRow(rows.find((r) => String(r.paramNo) === paramNo) ?? null);
+                  setEditorOpen(true);
+                }}
+              >
+                配置
+              </Button>
+              <Button type="primary" onClick={() => openTargetModal('copy')}>
+                复制
+              </Button>
+              <Button type="primary" onClick={() => openTargetModal('move')}>
+                移动
+              </Button>
+              <Popconfirm title="确定删除选中指标吗？" okText="确定" cancelText="取消" onConfirm={() => void doDelete()}>
+                <Button danger>删除</Button>
+              </Popconfirm>
+              <Button type="primary" onClick={() => void openImport()}>
+                业务指标快速引入
+              </Button>
+              <Button type="primary" onClick={() => void doRelateCheck()}>
+                关联校验
+              </Button>
+              <Popconfirm title="确定发起批量同步吗？" okText="确定" cancelText="取消" onConfirm={() => void doBatchSync()}>
+                <Button type="primary">批量同步</Button>
+              </Popconfirm>
+              <Button type="primary" onClick={() => void doRefreshCache()}>
+                刷新缓存
+              </Button>
+              <Button onClick={() => void loadList(pageIndex, pageSize, selectedGroup, filter)}>刷新</Button>
+            </Space>
+
+            <Table<IndexParamRow>
+              rowKey="paramNo"
+              size="small"
+              loading={loading}
+              columns={COLUMNS}
+              dataSource={rows}
+              scroll={{ x: 2000 }}
+              rowSelection={{
+                selectedRowKeys: rowKeys,
+                onChange: (keys) => setRowKeys(keys),
+              }}
+              pagination={{
+                current: pageIndex,
+                pageSize,
+                total,
+                showSizeChanger: true,
+                showQuickJumper: true,
+                showTotal: (t) => `共 ${t} 条`,
+                onChange: (p, s) => {
+                  setPageIndex(p);
+                  setPageSize(s);
+                },
+              }}
+            />
+          </Card>
+        </Col>
+      </Row>
+
+      {/* 分组新增/编辑 */}
+      <Modal
+        open={groupModal.open}
+        title={groupModal.mode === 'add' ? '添加分组' : groupModal.mode === 'addChild' ? '添加下级分组' : '编辑分组'}
+        onCancel={() => setGroupModal((s) => ({ ...s, open: false }))}
+        onOk={() => void doSaveGroup()}
+        confirmLoading={groupSaving}
+        destroyOnHidden
+      >
+        <Form layout="vertical">
+          <Form.Item label="分组名称" required>
+            <Input
+              placeholder="请输入分组名称"
+              value={groupForm.groupName}
+              onChange={(e) => setGroupForm((p) => ({ ...p, groupName: e.target.value }))}
+            />
+          </Form.Item>
+          <Form.Item label="分组值">
+            <Input
+              placeholder="请输入分组值（可留空）"
+              value={groupForm.groupValue}
+              onChange={(e) => setGroupForm((p) => ({ ...p, groupValue: e.target.value }))}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* 复制 / 移动：选目标分组 */}
+      <Modal
+        open={targetModal.open}
+        title={targetModal.mode === 'copy' ? '复制到分组' : '移动到分组'}
+        onCancel={() => setTargetModal((s) => ({ ...s, open: false }))}
+        onOk={() => void doTargetConfirm()}
+        width={520}
+        destroyOnHidden
+      >
+        <div style={{ marginBottom: 8, color: '#8c8c8c' }}>
+          {targetModal.mode === 'copy' ? '选择要复制到的目标分组' : '选择要移动到的目标分组'}
+        </div>
+        <div style={{ maxHeight: 360, overflow: 'auto', border: '1px solid #f0f0f0', padding: 8 }}>
+          {treeData.length ? (
+            <Tree
+              treeData={treeData as never}
+              defaultExpandAll
+              selectedKeys={targetGroup ? [targetGroup.groupId] : []}
+              onSelect={(keys) => {
+                if (!keys.length) {
+                  setTargetGroup(null);
+                  return;
+                }
+                setTargetGroup(findGroup(tree, String(keys[0])));
+              }}
+            />
+          ) : (
+            <div style={{ color: '#8c8c8c', textAlign: 'center', padding: 20 }}>暂无分组数据</div>
+          )}
+        </div>
+      </Modal>
+
+      {/* 关联信息（源 IndexRelateInfoTab：「知识库 / 指标」两个页签） */}
+      <IndexRelateInfoModal open={!!relateParam} curParam={relateParam} onClose={() => setRelateParam(null)} />
+
+      {/* 业务指标快速引入（基础版） */}
+      <Modal
+        open={importModal}
+        title={`业务指标快速引入 → ${selectedGroup?.groupName ?? ''}`}
+        onCancel={() => setImportModal(false)}
+        onOk={() => void doImportConfirm()}
+        confirmLoading={importLoading}
+        width={900}
+        destroyOnHidden
+      >
+        <div style={{ marginBottom: 8, color: '#8c8c8c' }}>
+          从全部指标中多选，确认后会以「复制」方式引入到当前分组。已选 {importKeys.length} 个。
+        </div>
+        <Table<IndexParamRow>
+          rowKey="paramNo"
+          size="small"
+          loading={importLoading}
+          dataSource={importRows}
+          columns={[
+            { title: '指标ID', dataIndex: 'paramNo', width: 240, ellipsis: true },
+            { title: '指标名称', dataIndex: 'paramName', width: 200, ellipsis: true },
+            { title: '数据源类型', dataIndex: 'scriptTypeDesc', width: 140, align: 'center' },
+          ]}
+          scroll={{ y: 360, x: 600 }}
+          rowSelection={{ selectedRowKeys: importKeys, onChange: (keys) => setImportKeys(keys) }}
+          pagination={{ pageSize: 20, showSizeChanger: false }}
+        />
+      </Modal>
+
+      {/* 新增 / 配置指标 */}
+      <IndexEditorModal
+        open={editorOpen}
+        editType={editorType}
+        row={editorRow}
+        parentGroup={selectedGroup}
+        onClose={() => setEditorOpen(false)}
+        onSuccess={() => {
+          setEditorOpen(false);
+          void loadList(pageIndex, pageSize, selectedGroup, filter);
+        }}
+      />
+    </div>
   );
 }

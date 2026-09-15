@@ -70,13 +70,16 @@ export function getEntsList(name: string): Promise<unknown> {
 /**
  * 指标树（检查项表达式编辑时可点的指标）
  *
- * 源工程用的是宿主 `@/api` 的 `paramsAllList`，其定义为
- * `postAction('/index/config/all/queryList', params, 60 * 1000)`。
- * 这里按同一 URL 与同一入参调，**不改后端契约**。
+ * ⚠️ URL 与源工程**不同**，这里踩过一次坑（联调时 404）：
+ *   源工程 `@/api/index.js` 里是 `postAction('/index/config/all/queryList')`，
+ *   那是因为源后端该 Controller 的路径就是 `/index/config`。
+ *   本工程的后端路径是 **`/api/agent/index/config`**（见 IndexConfigController），
+ *   所以前端要调 `/agent/index/config/all/queryList`（baseURL=/api）。
+ *   **规律：前端 URL = 后端路径去掉开头的 `/api`**。
  */
 export function loadIndexTree(): Promise<AgentListResult<IndexTreeNode>> {
   return agentPost<AgentListResult<IndexTreeNode>>(
-    '/index/config/all/queryList',
+    '/agent/index/config/all/queryList',
     {
       filters: [],
       modelNo: 'Public',
@@ -93,15 +96,24 @@ export function loadIndexTree(): Promise<AgentListResult<IndexTreeNode>> {
 /**
  * 「补充分析」下拉选项
  *
- * 源工程调用 `simplePageList({ keyword, pageIndex, pageSize })`
- * → `/KnowledgeBase/config/simplePageList`。
- * 注意后端返回的是 ListResult 结构（list 字段），不是数组本身。
+ * 契约（2026-09-15 已核实并修正后端，不再是"待确认"）：
+ *   后端 `KnowledgeBaseConfigServiceImpl#simplePageKnowledgeBaseParamsList` 的返回类型是 `Object`，
+ *   源实现在【空结果】时 `return Collections.emptyMap()`、有结果时返回 `List<JSONObject>`，
+ *   于是同一个接口出现 `{}` 与 `[]` 两种形态；而调用方直接 `res.result.find(...)`（假定恒为数组），
+ *   空结果时会抛 `find is not a function`。
+ *
+ *   已修后端为空结果也返回空 List，对外契约收敛为「**永远是数组**」。
+ *   前端仍保留数组/`list` 两种识别（防御性，成本极低），这样即便回滚后端也不会崩。
  */
 export async function getSupplementaryOptions(keyword: string): Promise<SupplementaryOption[]> {
-  const res = await agentPost<AgentListResult<SupplementaryOption>>('/KnowledgeBase/config/simplePageList', {
-    keyword: keyword || '',
-    pageIndex: 1,
-    pageSize: 200,
-  });
+  const res = await agentPost<AgentListResult<SupplementaryOption> | SupplementaryOption[]>(
+    '/KnowledgeBase/config/simplePageList',
+    {
+      keyword: keyword || '',
+      pageIndex: 1,
+      pageSize: 200,
+    },
+  );
+  if (Array.isArray(res)) return res;
   return res?.list ?? [];
 }
