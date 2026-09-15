@@ -280,7 +280,11 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
         // 反查不到就退回 code 当名称（源工程同款降级：`label: item ? item.paramName : code`）
         setSuppValue({ value: code, label: hit ? hit.paramName : code });
       }
-    } catch {
+    } catch (err) {
+      // 以前这里是**静默**吞掉（只清空选项）→ 接口 404 时下拉恒为空，界面上看不出原因。
+      // 2026-09-16 实锤过一次：`api/rule.ts` 漏了 `/agent` 前缀导致 404。
+      // 现在至少留一条控制台记录，便于下次一眼定位。
+      console.error('[RuleFormModal] 补充分析下拉加载失败：', err);
       setSuppOptions([]);
     }
   }, []);
@@ -799,6 +803,18 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
    * **中位 3 / 最大 24**（「报表真实性」），超过 10 行的只有 3 条（12、13、24 行）。
    * 也就是说分页对大多数检查项是 1 页、对少数长明细才有意义 —— 但 24 行塞在左栏 300px 里很难用，所以值得做。
    */
+  /**
+   * 🔴 「涉及指标」这一列**不是"命中的指标"**（2026-09-16 澄清 + 改展示）
+   *
+   * 后端 `executeRule` 里 `matchedMetrics = paramsList.stream().map(...)`，
+   * 而 `paramsList` = **表达式里引用的全部指标**（`getParamsList(emptyMetricList(表达式))`）——
+   * 它在**取数之前**就构造好了，取值用的还是 `rawDataSnapshot.getOrDefault(paramNo, "")`。
+   * ⇒ 只要表达式引用了指标，这张表**必然有行**，与"取没取到值""算没算成"完全无关。
+   * 字段名叫 `matchedMetrics` 容易误解成"命中结果"，实际是"**本次校验用到的指标清单**"。
+   *
+   * 所以"校验失败但溯源表有行"**不矛盾** —— 那几行的「命中值」为空。为了不再让人误会，
+   * 空值不再显示成 `-`（太像"有数据"），改成灰色「未取到」。
+   */
   const traceColumns = useMemo<ColumnsType<RuleMetricItem>>(
     () => [
       { title: '涉及指标', dataIndex: 'indexCode', width: '30%', render: (v: unknown) => String(v || '-') },
@@ -808,11 +824,25 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
         dataIndex: 'actualValue',
         width: '26%',
         render: (v: unknown) =>
-          v === '' || v === undefined || v === null || v === 'null' ? '-' : String(v),
+          v === '' || v === undefined || v === null || v === 'null' ? (
+            <span style={{ color: '#bfbfbf' }}>未取到</span>
+          ) : (
+            String(v)
+          ),
       },
       { title: '单位', dataIndex: 'dataUnit', width: '14%', render: (v: unknown) => String(v || '-') },
     ],
     [],
+  );
+
+  /** 溯源表里"未取到值"的行数（表上方说明用，与后端 `missingValueCount` 同口径） */
+  const traceMissingCount = useMemo(
+    () =>
+      matchedMetrics.filter(
+        (m) =>
+          m.actualValue === '' || m.actualValue === undefined || m.actualValue === null || m.actualValue === 'null',
+      ).length,
+    [matchedMetrics],
   );
 
   return (
@@ -1267,6 +1297,18 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
             )}
 
             <div style={{ marginTop: 20, marginBottom: 8, color: '#595959' }}>校验溯源</div>
+            {/* 🔴 口径说明（2026-09-16 加）：这张表**不等于"命中结果"** ——
+                它是「本次表达式引用的指标清单」，在取数之前就定下来了，
+                所以"校验失败却仍有行"是正常的，关键看「命中值」列。
+                不放说明的话，用户会以为"有行 = 有数据 = 校验成功"（用户就是这么问的）。 */}
+            {matchedMetrics.length > 0 && (
+              <div style={{ marginBottom: 8, fontSize: 12, color: '#8c8c8c', lineHeight: 1.6 }}>
+                下方是本次表达式引用的 <b>{matchedMetrics.length}</b> 个指标（
+                <b>指标清单，不等于「命中结果」</b>）；其中{' '}
+                <b style={{ color: traceMissingCount > 0 ? '#faad14' : '#8c8c8c' }}>{traceMissingCount}</b> 个未取到值，
+                显示为灰色「未取到」。
+              </div>
+            )}
             {/* 源工程是手写 grid + `.trace-body{max-height:300px;overflow-y:auto}`（内部滚动），
                 但那 300px 对几十行的长明细依然难用（实测最大 24 行）→ 改为**前端分页**。
                 `matchedMetrics` 是校验接口**一次性返回的完整明细**（不是服务端分页列表），

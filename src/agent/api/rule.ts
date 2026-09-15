@@ -107,7 +107,12 @@ export function loadIndexTree(): Promise<AgentListResult<IndexTreeNode>> {
  */
 export async function getSupplementaryOptions(keyword: string): Promise<SupplementaryOption[]> {
   const res = await agentPost<AgentListResult<SupplementaryOption> | SupplementaryOption[]>(
-    '/KnowledgeBase/config/simplePageList',
+    // 🔴 必须带 `/agent` 前缀（2026-09-16 修）。基础地址是 `/api`（见 `agentRequest.ts` 的
+    //    `baseURL`），而后端是 `@RequestMapping("/api/agent/KnowledgeBase/config")` ——
+    //    漏掉 `/agent` 会请求到 `/api/KnowledgeBase/config/simplePageList`，
+    //    直接 **404 Not Found**（用户实测就是这个报错），于是「补充分析」下拉恒为空。
+    //    ⛔ 别照抄源工程的 URL（源工程 baseURL 是 `/jeecg-boot`，路径本身不带 /agent）。
+    '/agent/KnowledgeBase/config/simplePageList',
     {
       keyword: keyword || '',
       pageIndex: 1,
