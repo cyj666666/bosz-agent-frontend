@@ -740,12 +740,14 @@ export function IndexDataSourceCard({
             />
           </Space>
           {/* 表名检索（源 `a-input-search`：`enter-button` + `allowClear`；
-              本工程加了**输入即搜**：400ms 防抖后按新关键字重查） */}
+              本工程加了**输入即搜**：400ms 防抖后按新关键字重查）
+              ⚠️ 未选数据源时**禁用**（2026-09-16）：此前输入框可点，但后端拿不到 dataSourceId
+              会直接清空列表、前端连请求都不发 —— 表现就是"输了没反应"，像检索坏了。 */}
           <Input.Search
             allowClear
             enterButton
-            disabled={disabled}
-            placeholder="请输入表名"
+            disabled={disabled || !dataSourceId}
+            placeholder={dataSourceId ? '请输入表名' : '请先选择数据源'}
             style={{ width: '100%', marginBottom: 8 }}
             value={tableKeyword}
             onChange={(e) => onKeywordChange(e.target.value)}
@@ -763,7 +765,28 @@ export function IndexDataSourceCard({
             /* 源工程是「点击整行即生成 select * from 表名」 */
             onRow={(row) => ({ onClick: () => pickTable(row) })}
             rowClassName={() => (disabled ? '' : 'agent-table-row-clickable')}
-            locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请先选择数据源" /> }}
+            locale={{
+              /* ⚠️ 空态文案要分情况（2026-09-16 修）：
+                 原先无论什么原因空列表都显示「请先选择数据源」——
+                 首次**冷启动加载中**、检索没命中时都这么说，用户会以为"数据源丢了 / 检索坏了"。
+                 （"首次进入要等一会"= 后端第一次用到该数据源要现建连接池，
+                   日志实证：`创建新的DB数据库连接` → 连续 5 次握手 → `{dataSource-2} inited` ≈0.6s，
+                   之后每次都是 `从缓存中获取DB连接`，毫秒级。） */
+              emptyText: (
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description={
+                    !dataSourceId
+                      ? '请先选择数据源'
+                      : tablesLoading
+                        ? '正在加载表列表…'
+                        : tableKeyword
+                          ? `无匹配的表（关键字「${tableKeyword}」）`
+                          : '该数据源下没有可用的表'
+                  }
+                />
+              ),
+            }}
           />
           <div style={{ marginTop: 8, marginBottom: 4 }}>SQL 脚本</div>
           <Input.TextArea
