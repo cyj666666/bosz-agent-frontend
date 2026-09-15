@@ -8,10 +8,14 @@
  *   1) **SSE 结束做双保险**（见 api/agentSse.ts 注释），源工程只认服务端下发的 `finished!`。
  *   2) **返回体判断**：源工程判 `res.success`，本工程由 agentRequest 统一校验 code 并解包，
  *      这里只写 try/catch。
- *   3) **AI分析 / 补充分析增补三处可观测性**（2026-09-16，源工程没有）：
- *      ① 出错把原因显示出来（源工程出错时整块消失，看不出是失败）；
- *      ② 流结束但一个字都没收到 → 明确提示；
- *      ③ 重新生成时保留上一次结果，不再整块刷白重打。
+ *   3) **「开始校验」做成"看得见的智能体流水线"**（2026-09-16 用户要求，源工程没有）：
+ *      ① 结果面板有**最小停留时长** `MIN_EXECUTE_MS`（规则引擎算太快，看不出在处理）；
+ *      ② **每次点校验都清空上一次的全部产出**（校验结论 / 命中明细 / AI分析 / 补充分析），
+ *         再各自转圈等待 —— 用户原话：「已经再次发起校验了，上次的结果还挂着很怪」，
+ *         并要求「要看起来非常像个 AI 智能体的效果」；
+ *      ③ 按钮下方加**阶段状态条**（`Steps`：规则校验 → AI 分析 → 补充分析），
+ *         进行中转圈、未命中标「跳过」，与代码里的真实顺序一一对应（不是假进度条）；
+ *      ④ 出错把原因显示出来；流结束但一个字都没收到 → 明确提示。
  *      （打字机效果 `useTypewriter` 与源 `PrintMixin` 对齐，非差异。）
  *
  * 校验前置条件（照抄源工程，别"优化"掉，否则用户会拿到莫名其妙的报错）：
@@ -20,9 +24,10 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Key } from 'react';
-import { Button, Card, Col, Collapse, Empty, Form, Input, Modal, Row, Select, Space, Tree, message } from 'antd';
-import type { TreeDataNode } from 'antd';
-import { CheckCircleFilled, WarningFilled } from '@ant-design/icons';
+import { Button, Card, Col, Collapse, Empty, Form, Input, Modal, Row, Select, Space, Spin, Steps, Table, Tree, message } from 'antd';
+import type { ColumnsType } from 'antd/es/table';
+import type { StepsProps, TreeDataNode } from 'antd';
+import { CheckCircleFilled, CloseCircleFilled, LoadingOutlined, WarningFilled } from '@ant-design/icons';
 import {
   executeRule as apiExecuteRule,
   getSupplementaryOptions,
@@ -35,9 +40,31 @@ import type { IndexTreeNode, RuleExecuteResult, RuleItem, RuleMetricItem, Supple
 import MarkdownText from '../../components/MarkdownText';
 import { useTypewriter } from '../../components/useTypewriter';
 import { ThinkText } from '../../components/ThinkText';
+import { AgentRunning, StreamCaret } from '../../components/AgentRunning';
 
 /** 触发条件解析智能体在知识库侧的 moduleCode（源工程写死） */
 const AI_ANALYSIS_MODULE_CODE = 'IntelligentStrategyEngine';
+
+/**
+ * 「开始校验」结果面板的最小停留时长（ms）—— 2026-09-16 用户要求
+ *
+ * 规则引擎是**本地确定性计算**，一次校验通常几十毫秒就返回，结果"啪"地直接出现，
+ * 用户反馈"看着不像智能体在处理"。这里给结果面板一个**最小可见的等待态**：
+ * 请求照旧尽早发出，只是**结果延后到至少 `MIN_EXECUTE_MS` 才落屏**（超时则立即落屏，不加长慢请求）。
+ * 取 700ms：足够让人看到"校验中…"，又不会觉得卡。
+ */
+const MIN_EXECUTE_MS = 700;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * 「智能体执行中」面板的阶段提示语（`AgentRunning` 用）
+ *
+ * 必须与实际链路一致：`/agent/get` → 后端按 moduleCode 查知识库配置 → 拼提示词 → 调大模型 → SSE 回传。
+ * 补充分析多一步"读取该检查项绑定的经验库文案"。
+ */
+const AI_HINTS = ['正在读取命中指标…', '正在拼装分析提示词…', '正在请求大模型…', '正在生成分析结论…'];
+const SUPP_HINTS = ['正在读取经验库文案…', '正在拼装分析提示词…', '正在请求大模型…', '正在生成补充分析…'];
 
 /** 源工程列出的"未命中"判定集合，逐项照抄——后端 resultStatus 类型不固定（布尔/字符串） */
 const MISS_VALUES: Array<boolean | string | null | undefined> = [
@@ -121,7 +148,28 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
 
   const [params, setParams] = useState<ParamRow[]>([{ ...DEFAULT_PARAM }]);
   const [matchedMetrics, setMatchedMetrics] = useState<RuleMetricItem[]>([]);
+  /**
+   * 「校验溯源」表的**前端分页**状态
+   *
+   * 为什么要自己持页码（不用非受控）：每次点「开始校验」都会把 `matchedMetrics` 清空再由结果填回，
+   * 非受控的话页码会停在上一轮的页（比如上次在第 4 页、这次只有 1 页 → 显示空白），
+   * 所以 `doExecute` 里显式 `setTracePage(1)` 归位。
+   */
+  const [tracePage, setTracePage] = useState(1);
+  const [tracePageSize, setTracePageSize] = useState(10);
   const [executeResult, setExecuteResult] = useState<boolean | string | null>(null);
+  /**
+   * 本次校验的**取数/执行事实**（后端 2026-09-16 新增返回）
+   *
+   * 为什么需要：`entName` 只是一个普通入参，后端**不校验企业是否存在**。
+   * 填一个不存在的企业名时，指标 SQL 照常执行但返回 0 行 → 拿空值/默认值去算表达式，
+   * 依然会得出"命中/未命中"，甚至照常触发 AI 分析 —— 从界面上完全看不出来数据是空的。
+   *
+   * · `failed`  表达式**根本没算成**（区别于"算出来是 false/未命中"）
+   * · `missing` 未取到值的指标数
+   * · `total`   本次涉及的指标总数
+   */
+  const [execInfo, setExecInfo] = useState<{ failed: boolean; missing: number; total: number } | null>(null);
 
   /**
    * 补充分析：**值里带名称**（对齐源工程 `label-in-value`）
@@ -138,9 +186,12 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
   /**
    * 两份文本：
    *   · `aiText` / `sText`  = SSE 累积的**完整目标文本**（每次开流清空，喂给打字机）；
-   *   · `aiShown` / `sShown` = **界面实际展示的**文本 —— 只有新内容到达时才顶上。
-   * 分开的原因（用户反馈"再次点击会先刷成空白再重新打字"）：若直接用累积值做展示，
-   * 开流瞬间会先清空 → 整块刷白，然后才逐字重打。保留上一次结果视觉上更连续。
+   *   · `aiShown` / `sShown` = **界面实际展示的**文本（打字机的输入），流式过程中"新内容一到就顶上"。
+   *
+   * 🔴 2026-09-16 用户要求调整（**反转了上一版口径**）：
+   *   上一版为了让重跑时视觉连续，开流只清累积值、展示值保留上一次结果；
+   *   用户反馈"上次的就不要展示了，还停留在上次很奇怪"→ 现在**每次点「开始校验」把两份都清空**，
+   *   由 `aiSending` 驱动显示"分析中"等待态，新内容到达后再逐字追上。
    */
   const [aiText, setAiText] = useState('');
   const [aiShown, setAiShown] = useState('');
@@ -161,7 +212,7 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
   const aiDisplay = useTypewriter(aiShown);
   const sDisplay = useTypewriter(sShown);
 
-  /** 新内容一到就顶上展示值；`aiText` 为空（刚开流）时保留上一次结果，避免整块刷白 */
+  /** 新内容一到就顶上展示值（「开始校验」时置空 → 打字机自然从空开始重打） */
   useEffect(() => {
     if (aiText) setAiShown(aiText);
   }, [aiText]);
@@ -276,8 +327,14 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
       }
       setMatchedMetrics([]);
       setExecuteResult(null);
+      setExecInfo(null);
+      // 表达式变了 → 上一次的校验结论作废，AI分析/补充分析 的展示内容一并清空（含等待态标志）
       setAiText('');
+      setAiShown('');
+      setAiError('');
       setSText('');
+      setSShown('');
+      setSError('');
     } else {
       resetAll();
       void loadSuppOptions('');
@@ -407,7 +464,8 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
    * AI 分析（源工程 `aiAnalysisPostText`，moduleCode 写死 `IntelligentStrategyEngine`）
    *
    * 🔴 三处**必须区分"失败"和"空结果"**（2026-09-16 修复）：
-   *   1. 开流只清 `aiText`（累积值），**不动 `aiShown`** → 不再整块刷白；
+   *   1. 开流清空累积值与展示值（点「开始校验」时已清过一遍，这里再清一次保证自洽，
+   *      本函数即使被单独调用也是干净的一次）；
    *   2. 流结束时若一个字都没收到 → 明确提示（此前表现为"整块凭空消失"，看着像功能没做）；
    *   3. 出错把原因显示出来 —— 后端在 `large_model_code` 为空时会推一帧
    *      `{"code":500,"message":"非法的大模型CODE:"}`（知识库未配置即属此类），
@@ -416,6 +474,7 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
   const startAiAnalysis = (result: RuleExecuteResult) => {
     aiAbortRef.current?.abort();
     setAiText('');
+    setAiShown('');
     setAiError('');
     setAiSending(true);
     let received = false;
@@ -458,6 +517,7 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
     if (!suppValue) return;
     sAbortRef.current?.abort();
     setSText('');
+    setSShown('');
     setSError('');
     setSSending(true);
     let received = false;
@@ -497,7 +557,29 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
       message.warning('请先解析规则表达式');
       return;
     }
+    /** 「校验中…」最小可见时长的计时起点（含请求本身的耗时） */
+    const startedAt = Date.now();
     setExecuteLoading(true);
+
+    // 每次点「开始校验」都当**全新一次**（用户 2026-09-16：「已经再次发起校验了，上次的结果还挂着很怪」）：
+    //   ① 掐掉可能还在跑的 AI/补充分析 SSE；
+    //   ② 清空**上一次的全部产出** —— 校验结论、命中明细（溯源表）、AI分析、补充分析（含错误）；
+    //   ③ 清空后由 `executeLoading` / `aiSending` / `sSending` 驱动各处的转圈等待态，
+    //      新内容到达再落屏（等价于"从零开始跑一轮"）。
+    aiAbortRef.current?.abort();
+    sAbortRef.current?.abort();
+    setExecuteResult(null);
+    setMatchedMetrics([]);
+    setExecInfo(null);
+    // 溯源表分页归位：新一次校验的明细条数通常和上一次不同，页码留在旧值会停在空白页
+    setTracePage(1);
+    setAiText('');
+    setAiShown('');
+    setAiError('');
+    setSText('');
+    setSShown('');
+    setSError('');
+
     try {
       const requestParams: Record<string, unknown> = {};
       params.forEach((p) => {
@@ -514,13 +596,33 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
         factAnalysis: form.factAnalysis,
       });
 
-      aiAbortRef.current?.abort();
-      setAiText('');
+      // 规则引擎是本地确定性计算，通常几十毫秒就回来，结果"啪"地落屏看着不像智能体在处理 →
+      // 让「校验中…」至少可见 MIN_EXECUTE_MS。请求本身不延迟（已在途的耗时计入），
+      // 慢请求（超过 MIN_EXECUTE_MS）不会被再加长。
+      const rest = MIN_EXECUTE_MS - (Date.now() - startedAt);
+      if (rest > 0) {
+        await sleep(rest);
+      }
+
       setMatchedMetrics(res?.matchedMetrics ?? []);
       const status = res?.resultStatus ?? null;
       setExecuteResult(status);
+      // 取数/执行层面的事实（后端新增）：失败 ≠ 未命中；缺失值数量要如实告诉用户
+      const failed = res?.executeFailed === true;
+      setExecInfo({
+        failed,
+        missing: res?.missingValueCount ?? 0,
+        total: res?.totalMetricCount ?? 0,
+      });
 
-      if (!isMiss(status)) {
+      /*
+       * 🔴 只有**表达式真的算成了**、而且结果是"命中"时，才去调 AI 分析（2026-09-16 修）。
+       *
+       * 原先只判 `!isMiss(status)`：而 `isMiss(null)` 为 true，所以"执行失败"恰好也被挡掉了 ——
+       * 但那是**巧合**，不是显式约定；而且反过来，后端把空值/默认值算出的"命中"会照样触发分析，
+       * 于是"随便填个 aaaaa 也能出 AI 分析"。现在把 `failed` 显式写进条件。
+       */
+      if (!failed && !isMiss(status)) {
         startAiAnalysis(res);
         if (suppValue) startSupplementaryAnalysis(res?.factExpression ?? '');
       }
@@ -581,8 +683,17 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
 
   /* ---------------- 渲染 ---------------- */
 
-  const resultText =
-    typeof executeResult === 'string'
+  /**
+   * 🔴 表达式**执行失败** ≠ **未命中**（2026-09-16 修）
+   *
+   * 后端取不到指标值时，会拿空值/默认值去算表达式；算不成（异常）时 `resultStatus` 是 `null`。
+   * 若不区分，界面会把"这次校验根本没成立"显示成"未命中"——把数据问题伪装成业务结论。
+   */
+  const execFailed = execInfo?.failed === true;
+
+  const resultText = execFailed
+    ? '校验失败：规则表达式无法执行'
+    : typeof executeResult === 'string'
       ? executeResult
       : executeResult === true
         ? '命中'
@@ -590,8 +701,119 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
           ? '未命中'
           : '待校验';
 
-  const resultColor =
-    executeResult === true ? '#faad14' : executeResult === false ? '#52c41a' : '#8c8c8c';
+  const resultColor = execFailed
+    ? '#ff4d4f'
+    : executeResult === true
+      ? '#faad14'
+      : executeResult === false
+        ? '#52c41a'
+        : '#8c8c8c';
+
+  /**
+   * 取数完整性提示（后端新增的 `missingValueCount` / `totalMetricCount`）
+   *
+   * 是否要有这条提示，取决于"用户能不能从结果里看出数据是空的"——
+   * 实测：企业名填 `aaaaa` 时指标全部取不到值，但界面照样显示命中并跑 AI 分析。
+   */
+  const warnIncomplete = !execFailed && !!execInfo && execInfo.missing > 0 && execInfo.total > 0;
+
+  /**
+   * 「开始校验」链路的**阶段状态**（用户 2026-09-16：「要看起来非常像个 AI 智能体的效果」）
+   *
+   * 三个阶段与代码里的真实顺序**一一对应，不是假进度条**：
+   *   ① 规则校验 = `apiExecuteRule`（含命中判定，由规则引擎本地计算）
+   *   ② AI 分析   = 命中后 `startAiAnalysis` 的 SSE（moduleCode 写死 `IntelligentStrategyEngine`）
+   *   ③ 补充分析 = 选了「补充分析」且命中时 `startSupplementaryAnalysis` 的 SSE
+   *
+   * ⚠️ **转圈图标必须自己传**：查过 antd v6 的 `steps/index.js`（L160~188），
+   * `status='process'` 且**没有传 `icon`** 时它渲染的是 `-item-icon-number`（就是个序号），
+   * **不会自动转圈**。所以进行中那一格显式给 `<LoadingOutlined spin />`。
+   * 只在"进行中"传 icon，`finish`/`error` 仍用 antd 自带的 √ / ×。
+   * **未命中时后两步标「未命中，跳过」**而不是留空/转圈 —— 否则看着像卡住了。
+   */
+  const executeSteps = useMemo<StepsProps['items']>(() => {
+    // `execFailed` 时 resultStatus 是 null，但这次校验**已经跑过了**（只是没算成），
+    // 所以 hasResult 要把失败也算进去，否则第 1 格会停留显示"待执行"。
+    const hasResult = executeResult !== null || execFailed;
+    const miss = hasResult && !execFailed && isMiss(executeResult);
+    const running = <LoadingOutlined spin />;
+
+    const items: StepsProps['items'] = [
+      {
+        title: '规则校验',
+        // 表达式没算成 → error（antd 自带 ×），不要混进 finish 的"完成"语义
+        status: executeLoading ? 'process' : execFailed ? 'error' : hasResult ? 'finish' : 'wait',
+        icon: executeLoading ? running : undefined,
+        description: executeLoading
+          ? '校验中…'
+          : execFailed
+            ? '执行失败'
+            : !hasResult
+              ? '待执行'
+              : miss
+                ? '未命中'
+                : '命中',
+      },
+      {
+        title: 'AI 分析',
+        status: aiSending ? 'process' : aiError ? 'error' : aiShown ? 'finish' : 'wait',
+        icon: aiSending ? running : undefined,
+        description: aiSending
+          ? '分析中…'
+          : aiError
+            ? '失败'
+            : aiShown
+              ? '已完成'
+              : miss
+                ? '未命中，跳过'
+                : '待执行',
+      },
+    ];
+    // 未选「补充分析」时这一格没有意义，不展示
+    if (suppValue) {
+      items.push({
+        title: '补充分析',
+        status: sSending ? 'process' : sError ? 'error' : sShown ? 'finish' : 'wait',
+        icon: sSending ? running : undefined,
+        description: sSending
+          ? '生成中…'
+          : sError
+            ? '失败'
+            : sShown
+              ? '已完成'
+              : miss
+                ? '未命中，跳过'
+                : '待执行',
+      });
+    }
+    return items;
+  }, [executeLoading, executeResult, execFailed, aiSending, aiError, aiShown, sSending, sError, sShown, suppValue]);
+
+  /**
+   * 「校验溯源」表的列（源工程是手写 grid，字段与顺序逐条对齐）
+   *
+   * 为什么改成 antd `Table`：源工程 `.trace-body { max-height: 300px; overflow-y: auto }` 是**内部滚动**，
+   * 而我们这版连这个限高都漏了（超长明细会把整块撑长）→ 改为**前端分页**（用户 2026-09-16 要求）。
+   *
+   * 规模依据（实测交付包 `agent_rule` 全 42 条检查项的 `parsed_expression`，统计其中 `{编号|名称}` 的**去重**个数）：
+   * **中位 3 / 最大 24**（「报表真实性」），超过 10 行的只有 3 条（12、13、24 行）。
+   * 也就是说分页对大多数检查项是 1 页、对少数长明细才有意义 —— 但 24 行塞在左栏 300px 里很难用，所以值得做。
+   */
+  const traceColumns = useMemo<ColumnsType<RuleMetricItem>>(
+    () => [
+      { title: '涉及指标', dataIndex: 'indexCode', width: '30%', render: (v: unknown) => String(v || '-') },
+      { title: '指标名称', dataIndex: 'indexName', width: '30%', render: (v: unknown) => String(v || '-') },
+      {
+        title: '命中值',
+        dataIndex: 'actualValue',
+        width: '26%',
+        render: (v: unknown) =>
+          v === '' || v === undefined || v === null || v === 'null' ? '-' : String(v),
+      },
+      { title: '单位', dataIndex: 'dataUnit', width: '14%', render: (v: unknown) => String(v || '-') },
+    ],
+    [],
+  );
 
   return (
     <Modal
@@ -908,6 +1130,10 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
               开始校验
             </Button>
 
+            {/* 流程状态：把「开始校验」的真实链路显式摆出来 —— 规则校验 → AI 分析 →（补充分析）。
+                进行中的那格自动转圈，未命中标「跳过」，让人一眼看出走到哪一步、是不是在跑。 */}
+            <Steps size="small" items={executeSteps} style={{ marginTop: 18, marginBottom: 4 }} />
+
             <div style={{ marginTop: 20, marginBottom: 8, color: '#595959' }}>校验结果</div>
             <div
               style={{
@@ -918,15 +1144,57 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
                 borderRadius: 4,
                 background: '#fafafa',
                 border: '1px solid #f0f0f0',
-                color: resultColor,
+                /* 校验中固定灰色，避免把上一次的「命中(黄)/未命中(绿)」颜色留在等待态里 */
+                color: executeLoading ? '#8c8c8c' : resultColor,
                 fontWeight: 600,
               }}
             >
-              {/* 对齐源工程：命中 = 黄色告警图标；未命中 = 绿色通过图标（`result-panel` 的 hit/miss） */}
-              {executeResult === true && <WarningFilled />}
-              {executeResult === false && <CheckCircleFilled />}
-              <span>{resultText}</span>
+              {executeLoading ? (
+                /* 规则引擎算得太快（几十毫秒），这里让"校验中…"至少可见 MIN_EXECUTE_MS，
+                   否则结果瞬间落屏，看不出有在处理（2026-09-16 用户反馈） */
+                <>
+                  <Spin size="small" />
+                  <span>校验中…</span>
+                </>
+              ) : (
+                <>
+                  {/* 对齐源工程：命中 = 黄色告警图标；未命中 = 绿色通过图标（`result-panel` 的 hit/miss）；
+                      执行失败 = 红色失败图标（本工程新增，源工程没有这个状态，它把失败吞成了"未命中"） */}
+                  {execFailed && <CloseCircleFilled />}
+                  {!execFailed && executeResult === true && <WarningFilled />}
+                  {!execFailed && executeResult === false && <CheckCircleFilled />}
+                  <span>{resultText}</span>
+                </>
+              )}
             </div>
+
+            {/* 取数完整性提示（本工程新增，2026-09-16）：
+                `entName` 只是个普通入参，后端不校验企业是否存在 —— 填 `aaaaa` 这种不存在的企业时，
+                指标 SQL 照常执行但返回 0 行，表达式拿空值/默认值算出"命中"，还会触发 AI 分析。
+                这条提示让"数据是空的"这件事在界面上无法被忽略。 */}
+            {(execFailed || warnIncomplete) && execInfo && (
+              <div
+                style={{
+                  marginTop: 8,
+                  padding: '8px 12px',
+                  borderRadius: 4,
+                  background: '#fffbe6',
+                  border: '1px solid #ffe58f',
+                  color: '#614700',
+                  fontSize: 12,
+                  lineHeight: 1.6,
+                }}
+              >
+                本次校验涉及 <b>{execInfo.total}</b> 个指标，其中 <b>{execInfo.missing}</b> 个
+                <b>未取到值</b>。
+                {execInfo.missing === execInfo.total && execInfo.total > 0
+                  ? '（全部为空——通常是企业名称不存在或该企业本期没有数据）'
+                  : ''}
+                {execFailed
+                  ? '表达式在缺失值上无法执行，本次校验没有结论；请核对「企业名称」后重试。'
+                  : '缺失值会以空值/默认值参与计算，命中结论仅供参考；请核对「企业名称」。'}
+              </div>
+            )}
 
             {/* AI分析：块的出现条件与源工程一致（`finalText || sending`），并额外保留**错误态**，
                 避免"失败了却整块消失"，让用户以为功能不存在（2026-09-16 修复）。 */}
@@ -938,15 +1206,26 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
                     <div style={{ color: '#ff4d4f' }}>{aiError}</div>
                   ) : (
                     <>
-                      {/* 源工程这里是 loading.gif；本工程没有该资源，用文字占位表达同一状态 */}
-                      {aiSending && !aiText && (
-                        <div style={{ color: '#8c8c8c' }}>{aiShown ? '重新生成中…' : '生成中…'}</div>
+                      {/* 源工程这里是 loading.gif；本工程没有该资源 → 用「智能体执行中」面板表达同一状态
+                          （2026-09-16 由 `Spin + 文字` 升级，用户反馈"等待效果太普通、不像智能体在跑"）。
+                          判据用 `aiDisplay.text`（打字机输出）而非 `aiText`：打字机滞后于 SSE，
+                          用累积值会让面板提前消失、出现短暂空白。
+                          现在每次校验都会先清空上一次内容，所以这里**就是**"新一次的开始"，
+                          不再区分"生成中/重新生成中"。 */}
+                      {aiSending && !aiDisplay.text && (
+                        <AgentRunning
+                          compact
+                          title="智能体正在分析命中情况"
+                          hints={AI_HINTS}
+                          padding={12}
+                        />
                       )}
                       {/* 后端 enable_think=true 时会把思考内容用 <think>…</think> 包起来一起推，
                           这里交给 ThinkText 折叠显示（不渲染的话页面上会看到裸露的标签） */}
                       <ThinkText
                         text={aiDisplay.text}
                         renderText={(t) => <MarkdownText content={t} placeholder={aiSending ? '生成中…' : '-'} />}
+                        tail={<StreamCaret show={aiSending || aiDisplay.printing} />}
                       />
                     </>
                   )}
@@ -964,13 +1243,22 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
                     <div style={{ color: '#ff4d4f' }}>{sError}</div>
                   ) : (
                     <>
-                      {sSending && !sText && (
-                        <div style={{ color: '#8c8c8c' }}>{sShown ? '重新生成中…' : '生成中…'}</div>
+                      {sSending && !sDisplay.text && (
+                        <AgentRunning
+                          compact
+                          title="智能体正在生成补充分析"
+                          hints={SUPP_HINTS}
+                          padding={12}
+                        />
                       )}
-                      {!sSending && !sShown && <div style={{ color: '#8c8c8c' }}>点「开始校验」后生成</div>}
+                      {/* 未命中时不会触发补充分析（与源工程一致），此处给出说明而不是留空 */}
+                      {!sSending && !sShown && !sError && (
+                        <div style={{ color: '#8c8c8c' }}>点「开始校验」后生成（未命中不生成）</div>
+                      )}
                       <ThinkText
                         text={sDisplay.text}
                         renderText={(t) => <MarkdownText content={t} placeholder={sSending ? '生成中…' : '-'} />}
+                        tail={<StreamCaret show={sSending || sDisplay.printing} />}
                       />
                     </>
                   )}
@@ -979,46 +1267,38 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
             )}
 
             <div style={{ marginTop: 20, marginBottom: 8, color: '#595959' }}>校验溯源</div>
-            <div style={{ border: '1px solid #f0f0f0', borderRadius: 4 }}>
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '1fr 1fr 1fr 80px',
-                  background: '#fafafa',
-                  padding: '8px 12px',
-                  fontWeight: 600,
-                }}
-              >
-                <span>涉及指标</span>
-                <span>指标名称</span>
-                <span>命中值</span>
-                <span>单位</span>
-              </div>
-              {matchedMetrics.length === 0 ? (
-                <div style={{ padding: 16, textAlign: 'center', color: '#8c8c8c' }}>暂无溯源数据</div>
-              ) : (
-                matchedMetrics.map((m, i) => (
-                  <div
-                    key={i}
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: '1fr 1fr 1fr 80px',
-                      padding: '8px 12px',
-                      borderTop: '1px solid #f0f0f0',
-                    }}
-                  >
-                    <span>{m.indexCode || '-'}</span>
-                    <span>{m.indexName || '-'}</span>
-                    <span>
-                      {m.actualValue === '' || m.actualValue === undefined || m.actualValue === null || m.actualValue === 'null'
-                        ? '-'
-                        : m.actualValue}
-                    </span>
-                    <span>{m.dataUnit || '-'}</span>
+            {/* 源工程是手写 grid + `.trace-body{max-height:300px;overflow-y:auto}`（内部滚动），
+                但那 300px 对几十行的长明细依然难用（实测最大 24 行）→ 改为**前端分页**。
+                `matchedMetrics` 是校验接口**一次性返回的完整明细**（不是服务端分页列表），
+                所以这里分页纯属展示层，不需要新接口、也不需要改后端。 */}
+            <Table<RuleMetricItem>
+              rowKey={(_row, index) => String(index)}
+              size="small"
+              bordered
+              columns={traceColumns}
+              dataSource={matchedMetrics}
+              pagination={{
+                current: tracePage,
+                pageSize: tracePageSize,
+                size: 'small',
+                showSizeChanger: true,
+                pageSizeOptions: ['10', '20', '50'],
+                showTotal: (total) => `共 ${total} 条`,
+                onChange: (page, size) => {
+                  setTracePage(page);
+                  setTracePageSize(size);
+                },
+              }}
+              locale={{
+                /* 点「开始校验」时会先清空上一次的明细，所以这里要区分"正在跑"和"确实没有"；
+                   执行失败时明细行是有的（只是值全空），说明白比"暂无"更有用 */
+                emptyText: (
+                  <div style={{ padding: 16, color: '#8c8c8c' }}>
+                    {executeLoading ? '校验中…' : execFailed ? '校验失败，未能取到指标值' : '暂无溯源数据'}
                   </div>
-                ))
-              )}
-            </div>
+                ),
+              }}
+            />
           </Card>
         </Col>
       </Row>

@@ -25,7 +25,7 @@
  * 与源工程 `v-else` 分支的行为一致。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Col, Input, Modal, Radio, Row, Select, Space, Table, message } from 'antd';
+import { Button, Col, Input, Modal, Radio, Row, Select, Space, Table, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { getKnowledgeParamsList, getLargeModelOptions, saveBlackParam, updateKnowledgeParams } from '../../api/knowledgeConfig';
 import type { SelectOption } from '../../api/knowledgeConfig';
@@ -35,6 +35,11 @@ import { AdFormRenderer } from '../../components/AdFormRenderer';
 import type { AdFormOption, AdFormRendererHandle } from '../../components/AdFormRenderer';
 import { useTypewriter } from '../../components/useTypewriter';
 import { ThinkText } from '../../components/ThinkText';
+import MarkdownText from '../../components/MarkdownText';
+import { AgentRunning, StreamCaret } from '../../components/AgentRunning';
+
+/** 「智能体执行中」阶段提示语（与实际链路一致：读配置 → 拼提示词 → 调模型 → 出内容） */
+const BLACKBOX_PREVIEW_HINTS = ['正在读取黑盒配置…', '正在拼装提示词…', '正在请求大模型…', '正在逐字生成预览内容…'];
 
 export interface BlackBoxConfigModalProps {
   open: boolean;
@@ -359,8 +364,24 @@ export function BlackBoxConfigModal({
             onChange={(e) => setContentDesc(e.target.value)}
           />
           <div style={{ marginTop: 12, height: 300, overflow: 'auto', border: '1px solid #d9d9d9', borderRadius: 4, padding: 6 }}>
-            {sending && !previewText && <Alert type="info" message="正在生成…" showIcon style={{ marginBottom: 8 }} />}
-            <ThinkText text={previewDisplay.text} lineHeight={1.6} />
+            {/* 等待态：改用「智能体执行中」面板（原先是 `<Alert>正在生成…</Alert>`，用户反馈太普通）。
+                判据用 `previewDisplay.text` 而非 `previewText`：打字机滞后于 SSE。 */}
+            {sending && !previewDisplay.text && (
+              <AgentRunning
+                title="智能体正在生成预览结果"
+                hints={BLACKBOX_PREVIEW_HINTS}
+                meta={largeModelCode ? `大模型：${largeModelCode}` : undefined}
+                height={288}
+                padding={14}
+              />
+            )}
+            {/* 必须传 renderText 走 markdown 渲染：源工程 `KnownBlackBoxConfig.vue` 用的是
+                `<md-msg>`；ThinkText 默认分支是纯文本，不接渲染器时表格会显示成一堆 `|`。 */}
+            <ThinkText
+              text={previewDisplay.text}
+              renderText={(t) => <MarkdownText content={t} placeholder="" />}
+              tail={<StreamCaret show={sending || previewDisplay.printing} />}
+            />
           </div>
         </Col>
       </Row>

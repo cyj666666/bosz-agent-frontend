@@ -80,3 +80,115 @@ body {
  * ========================================================================== */
 .agent-table-row-clickable { cursor: pointer; }
 
+/* =============================================================================
+ * 大模型输出的 Markdown 渲染（`src/agent/components/MarkdownText.tsx`）
+ * ---------------------------------------------------------------------------
+ * 为什么必须有这块：`markdown-it` 只负责把 md 源码转成 HTML 标签，**样式全靠 CSS**。
+ * 没有样式时 `<table>` 会塌成一堆无边框文字、`<pre>` 不换行直接撑破容器 ——
+ * 用户看到的就是"markdown 没渲染 / 表格不支持"（2026-09-16 反馈）。
+ * ⚠️ `markdown-it` 已按 GFM 解析表格（`| a | b |` + 分隔行），不存在解析缺失，
+ *    所以这里只补展示样式，**不要**去动 MarkdownText 的解析配置。
+ * ⚠️ 主题是浅色：硬编码的颜色都按浅色底取，深色主题下需要另配。
+ * ========================================================================== */
+.agent-markdown {
+  line-height: 1.75;
+  color: rgba(0, 0, 0, 0.88);
+  word-break: break-word;
+}
+.agent-markdown > :first-child { margin-top: 0; }
+.agent-markdown > :last-child { margin-bottom: 0; }
+
+.agent-markdown p { margin: 0 0 8px; }
+.agent-markdown h1,
+.agent-markdown h2,
+.agent-markdown h3,
+.agent-markdown h4,
+.agent-markdown h5,
+.agent-markdown h6 {
+  margin: 14px 0 8px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.agent-markdown h1 { font-size: 20px; }
+.agent-markdown h2 { font-size: 18px; }
+.agent-markdown h3 { font-size: 16px; }
+.agent-markdown h4,
+.agent-markdown h5,
+.agent-markdown h6 { font-size: 14px; }
+
+.agent-markdown ul,
+.agent-markdown ol { margin: 0 0 8px; padding-left: 22px; }
+.agent-markdown li { margin: 2px 0; }
+.agent-markdown li > p { margin: 0; }
+
+.agent-markdown blockquote {
+  margin: 8px 0;
+  padding: 6px 12px;
+  border-left: 3px solid #d9d9d9;
+  background: #fafafa;
+  color: rgba(0, 0, 0, 0.65);
+}
+
+/* 行内代码 */
+.agent-markdown code {
+  padding: 1px 5px;
+  margin: 0 2px;
+  font-family: Consolas, Monaco, 'Courier New', monospace;
+  font-size: 0.92em;
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 3px;
+  /* 模型输出里常有很长的单行 JSON，允许断行，否则撑破容器 */
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+/* 代码块 */
+.agent-markdown pre {
+  margin: 8px 0;
+  padding: 10px 12px;
+  background: #f6f8fa;
+  border: 1px solid #eee;
+  border-radius: 4px;
+  overflow-x: auto;
+}
+.agent-markdown pre code {
+  margin: 0;
+  padding: 0;
+  background: none;
+  border-radius: 0;
+  white-space: pre;
+  word-break: normal;
+}
+
+/* 🔴 表格（本次问题的核心）：不设样式时是无边框的一坨文字 */
+.agent-markdown table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 13px;
+  /* 表格比容器宽时**独立横滚**，不要顶破外层弹框 */
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.agent-markdown th,
+.agent-markdown td {
+  border: 1px solid #e8e8e8;
+  padding: 6px 12px;
+  text-align: left;
+  vertical-align: top;
+}
+.agent-markdown thead th {
+  background: #fafafa;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.agent-markdown tbody tr:nth-child(even) { background: #fcfcfc; }
+
+.agent-markdown a { color: #1677ff; }
+.agent-markdown hr {
+  border: none;
+  border-top: 1px solid #e8e8e8;
+  margin: 12px 0;
+}
+.agent-markdown img { max-width: 100%; }
+

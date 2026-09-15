@@ -147,6 +147,17 @@ export interface RuleExecuteResult {
   resultStatus: boolean | string | null;
   matchedMetrics: RuleMetricItem[];
   factExpression: string;
+  /**
+   * 表达式是否执行失败 —— **失败 ≠ 未命中**。
+   *
+   * 后端在取不到指标值时会拿空值/默认值去算表达式，算不成（异常）时
+   * `resultStatus` 为 `null`。若不区分，界面会把"这次校验根本没成立"显示成"未命中"。
+   */
+  executeFailed?: boolean;
+  /** 未取到值的指标数（企业名不存在 / 该企业无数据时会出现） */
+  missingValueCount?: number;
+  /** 本次校验涉及的指标总数 */
+  totalMetricCount?: number;
 }
 
 /** 指标树节点（`/index/config/all/queryList` 返回的树） */

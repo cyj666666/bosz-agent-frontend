@@ -256,7 +256,13 @@ export function editRelateIndex(params: unknown): Promise<unknown> {
   return agentPost('/agent/KnowledgeBase/config/relate/index/edit', params);
 }
 
-export function deleteRelateIndex(params: Record<string, unknown>): Promise<unknown> {
+/**
+ * 知识库关联指标 - 按 id 删除
+ *
+ * ⚠️ 请求体是**裸数组** `[1,2]`（后端 `@RequestBody List<Integer>`），与新增/编辑不同，
+ * 所以入参类型是 `unknown`（和 `editRelateIndex` 同理）。
+ */
+export function deleteRelateIndex(params: unknown): Promise<unknown> {
   return agentPost('/agent/KnowledgeBase/config/relate/index/delete', params);
 }
 
@@ -349,14 +355,21 @@ export function getDictItems(dictCode: string): Promise<DictItemRow[]> {
  * 分类字典根列表（对应源 `loadTreeRoot(pcode, async)`）
  *
  * 源工程「细分参数配置」用它取 `X02` 分类下的细项，做「细项名称」下拉。
- * 本工程对应 `SysCategoryController` 的 `GET /api/agent/sys/category/rootList`。
+ * 返回 `TreeSelectModel`：`{ key, title, value, isLeaf, children }`。
+ *
+ * 🔴 2026-09-16 修正：原先指向 `GET /sys/category/rootList` —— **接口打错了**。
+ * 源工程与后端真正对应的是 `GET /sys/category/loadTreeRoot?pcode=&async=`（[SysCategoryController#loadTreeRoot]，
+ * 返回 `List<TreeSelectModel>`）；而 `rootList` 那支返回的是 **`IPage<SysCategory>`（一个分页对象）**，
+ * 前端按数组收 → 恒为空数组 ⇒ **「细项名称」下拉永远是空的**（且不报错）。
  */
-export function getCategoryRootList(pcode: string, async = true): Promise<CategoryNode[]> {
-  return agentGet<CategoryNode[]>('/agent/sys/category/rootList', { pcode, async });
+export function loadCategoryTreeRoot(pcode: string, async = true): Promise<CategoryNode[]> {
+  return agentGet<CategoryNode[]>('/agent/sys/category/loadTreeRoot', { pcode, async });
 }
 
-/** 分类节点（源工程用到 `title` / `value`，并在前端补 `label` / `descValue`） */
+/** 分类节点（源工程用到 `key` / `title` / `value`，并在前端补 `label` / `descValue`） */
 export interface CategoryNode {
+  /** 节点主键（`TreeSelectModel.key`） */
+  key?: string;
   id?: string;
   title?: string;
   value?: string;

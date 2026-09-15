@@ -75,26 +75,36 @@ export interface ThinkTextProps {
   renderText?: (t: string) => ReactNode;
   /** 正式内容的行高（仅默认纯文本渲染时生效） */
   lineHeight?: number;
+  /**
+   * 尾随内容（挂在**最后一个片段内部**，因此会紧跟在最后一个字符后面，而不是另起一行）。
+   *
+   * 用途：流式光标（`StreamCaret`）。若放在组件外面渲染，因为非思考片段是 `<div>`，
+   * 光标会掉到下一行、看着像"光标丢了"。
+   */
+  tail?: ReactNode;
 }
 
-export function ThinkText({ text, renderText, lineHeight = 1.7 }: ThinkTextProps) {
+export function ThinkText({ text, renderText, lineHeight = 1.7, tail }: ThinkTextProps) {
   const segments = splitThink(text ?? '');
   return (
     <>
-      {segments.map((seg, idx) =>
-        seg.think ? (
-          <ThinkBlock key={idx} text={seg.text} closed={seg.closed} />
+      {segments.map((seg, idx) => {
+        // 尾随内容只挂最后一个片段：思考块内部 / 正文块内部都要能承接
+        const segTail = idx === segments.length - 1 ? tail : null;
+        return seg.think ? (
+          <ThinkBlock key={idx} text={seg.text} closed={seg.closed} tail={segTail} />
         ) : (
           <div key={idx} style={{ whiteSpace: 'pre-wrap', lineHeight }}>
             {renderText ? renderText(seg.text) : seg.text}
+            {segTail}
           </div>
-        ),
-      )}
+        );
+      })}
     </>
   );
 }
 
-function ThinkBlock({ text, closed }: { text: string; closed: boolean }) {
+function ThinkBlock({ text, closed, tail }: { text: string; closed: boolean; tail?: ReactNode }) {
   // 未闭合 = 模型还在思考 → 默认展开；闭合后自动收起
   const [open, setOpen] = useState(!closed);
   /** 用户手动开合过之后，不再自动控制（避免"我展开着它自己收回去"） */
@@ -143,6 +153,7 @@ function ThinkBlock({ text, closed }: { text: string; closed: boolean }) {
           }}
         >
           {text}
+          {tail}
         </div>
       )}
     </div>

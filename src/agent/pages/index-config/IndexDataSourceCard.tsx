@@ -685,8 +685,11 @@ export function IndexDataSourceCard({
     title: h,
     dataIndex: h,
     key: h,
+    // ⚠️ 每列**不要写死宽度**（原先统一 `width: 250`）：列少时整张表只有几百像素宽，
+    //    塞在很宽的弹框里就是一条细长条，看着很"扁"（用户 2026-09-16 反馈）。
+    //    这里交给表格按容器宽度自适应（配合 `scroll.x='max-content'`：内容真的更宽时才横向滚动）。
+    //    `ellipsis` + 下面的 Tooltip 保证单个超长值不会把列撑爆。
     ellipsis: true,
-    width: 250,
     render: (text: unknown) => (
       <Tooltip title={String(text ?? '')}>
         <span>{text === null || text === undefined || text === '' ? '（空值）' : String(text)}</span>
@@ -986,23 +989,38 @@ export function IndexDataSourceCard({
             </span>
           </Space>
         }
-        width="90vw"
-        style={{ top: 24, maxWidth: 1680, paddingBottom: 0 }}
+        /* 宽度：铺满视口（96vw），并在 `style` 里**再显式写一遍 + maxWidth:none** ——
+           inline style 优先级最高，避免任何全局/主题 CSS 的 `max-width` 把宽度压回去
+           （早先是源工程那样的固定 1200；用户两次要求放宽，本次再加大）。
+           高度：弹框贴顶 `top:24`；表体按视口自适应，且**最大/最小高度都给**——
+           行多时不越屏，行少时（哪怕只有 1 行）也铺满，不再缩成一条。 */
+        width="96vw"
+        style={{ top: 24, width: '96vw', maxWidth: 'none', paddingBottom: 0 }}
         styles={{ body: { padding: '12px 16px 0' } }}
         footer={<Button onClick={() => setPreviewOpen(false)}>关闭</Button>}
         onCancel={() => setPreviewOpen(false)}
         destroyOnHidden
       >
-        <Table<Record<string, unknown>>
-          rowKey={(_row, index) => String(index)}
-          size="small"
-          loading={previewLoading}
-          columns={previewColumns}
-          dataSource={(previewResult.dataList ?? []) as Record<string, unknown>[]}
-          pagination={false}
-          scroll={{ x: 'max-content', y: 'calc(100vh - 220px)' }}
-          locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="无数据" /> }}
-        />
+        {/* 高度：`scroll.y` 是**最大高度**语义（antd 给表体挂的是 max-height），
+            所以数据只有 1~2 行时表体会缩成那么高，弹框整体跟着变"扁"（用户 2026-09-16 反馈：
+            "就只有一条数据，整个框扁扁的"）。这里补一层**最小高度**，让数据少时也铺满屏幕。
+            外层 div 的 minHeight 是兜底：万一目标类名在 antd 版本间有差异，弹框高度仍够。 */}
+        <div className="agent-preview-grid" style={{ minHeight: 'calc(100vh - 300px)' }}>
+          <style>{`
+            .agent-preview-grid .ant-table-body,
+            .agent-preview-grid .ant-table-content { min-height: calc(100vh - 260px); }
+          `}</style>
+          <Table<Record<string, unknown>>
+            rowKey={(_row, index) => String(index)}
+            size="small"
+            loading={previewLoading}
+            columns={previewColumns}
+            dataSource={(previewResult.dataList ?? []) as Record<string, unknown>[]}
+            pagination={false}
+            scroll={{ x: 'max-content', y: 'calc(100vh - 260px)' }}
+            locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="无数据" /> }}
+          />
+        </div>
       </Modal>
     </div>
   );

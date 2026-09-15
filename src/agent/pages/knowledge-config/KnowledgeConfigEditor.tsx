@@ -62,7 +62,7 @@
  *   （源 `getFormInfo()` 里它们是顶层 `inputCondition` / `configInfo.userPrompt`）。
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Button, Card, Col, Input, InputNumber, Modal, Radio, Row, Select, Space, Spin, Switch, Tabs, Tooltip, message } from 'antd';
+import { Button, Card, Col, Input, InputNumber, Modal, Radio, Row, Select, Space, Spin, Switch, Tabs, Tooltip, message } from 'antd';
 import type { InputRef } from 'antd';
 import { agentSse } from '../../api/agentSse';
 import type { AgentSseHandle } from '../../api/agentSse';
@@ -86,6 +86,8 @@ import { IndexParamConfigModal } from './IndexParamConfigModal';
 import { BlackBoxConfigModal } from './BlackBoxConfigModal';
 import { useTypewriter } from '../../components/useTypewriter';
 import { ThinkText } from '../../components/ThinkText';
+import MarkdownText from '../../components/MarkdownText';
+import { AgentRunning, StreamCaret } from '../../components/AgentRunning';
 import { HistoryVersionModal, PublishVersionModal } from './VersionModals';
 import { getLargeModelOptions, previewKnowledge, queryGroupTree, queryInfo, queryVersionById, updateKnowledge } from '../../api/knowledgeConfig';
 import type { KnowledgeGroupNode, SelectOption } from '../../api/knowledgeConfig';
@@ -130,6 +132,19 @@ interface ModelParam {
 
 /** 源 `setCodeParam()` 的兜底值：该模型没有记录时用的空表单 */
 const EMPTY_MODEL_PARAM: ModelParam = { topP: null, temperature: null, systemContent: '', enableThink: null };
+
+/**
+ * 「智能体执行中」面板的阶段提示语（`AgentRunning` 用）
+ *
+ * ⚠️ 这三组文案**必须与实际请求链路一致**，不许写代码里不存在的阶段（那是假进度条）；
+ *    顺序也按真实发生顺序排（先读配置/拼提示词，再请求模型，最后出内容）。
+ *    · 生成文案 = `/KnowledgeBase/config/preview`（一次性），后端读库 → 按条件组拼提示词
+ *    · 预览结果 = `getSummaryAnswer`（POST-SSE），后端拼提示词 → 调大模型 → 流式回传
+ *    · 结果校验 = `getResultCheck`（POST-SSE），读校验模版 → 调大模型 → 流式回传
+ */
+const PROMPT_HINTS = ['正在读取知识库配置…', '正在按条件组拼装提示词…', '正在渲染指标与参数字段…'];
+const PREVIEW_HINTS = ['正在读取最新配置…', '正在拼装提示词…', '正在请求大模型…', '正在逐字生成分析内容…'];
+const CHECK_HINTS = ['正在读取校验模版…', '正在请求大模型…', '正在逐条比对生成校验结论…'];
 
 /**
  * 解析 `largeModelContent`（源 `OutputDemand` 的 watch(props.largeModelContent)）
@@ -1055,19 +1070,31 @@ export function KnowledgeConfigEditor({
           {/* 左：生成文案（源 PreviewModal 的 content-container） */}
           <Col span={12}>
             <div style={{ fontWeight: 600, marginBottom: 8 }}>生成文案</div>
-            <Spin spinning={previewPromptLoading}>
-              <Input.TextArea
-                rows={20}
-                value={previewPrompt}
-                onChange={(e) => setPreviewPrompt(e.target.value)}
-                placeholder="生成中的提示词文案，可编辑后重新预览"
+            {/* 等待态：改用「智能体执行中」面板（原先是一个 antd `<Spin>` 转圈遮罩，
+                用户反馈"太普通，不像智能体在跑"）。这里顺手把 loading 期的输入框置为
+                disabled —— 原先靠 Spin 遮罩挡住交互，去掉遮罩后必须显式禁用，否则能改到半截文案。 */}
+            {previewPromptLoading && (
+              <AgentRunning
+                compact
+                title="智能体正在生成提示词文案"
+                hints={PROMPT_HINTS}
+                meta={configInfo.largeModelCode ? `大模型：${String(configInfo.largeModelCode)}` : undefined}
+                padding={12}
               />
-            </Spin>
+            )}
+            <Input.TextArea
+              rows={previewPromptLoading ? 16 : 20}
+              disabled={previewPromptLoading}
+              value={previewPrompt}
+              onChange={(e) => setPreviewPrompt(e.target.value)}
+              placeholder="生成中的提示词文案，可编辑后重新预览"
+              style={{ marginTop: previewPromptLoading ? 8 : 0 }}
+            />
             <Button
               type="primary"
               style={{ marginTop: 8 }}
               onClick={() => startPreviewStream()}
-              disabled={previewing}
+              disabled={previewing || previewPromptLoading}
             >
               预览
             </Button>
@@ -1084,10 +1111,24 @@ export function KnowledgeConfigEditor({
                 padding: 8,
               }}
             >
-              {previewing && !previewText && (
-                <Alert type="info" message="正在生成…" showIcon style={{ marginBottom: 8 }} />
+              {/* 两种等待阶段分开表达（真流式下必然先经历"没字"再"出字"）：
+                  · 面板 = 还没出字（占位 + 真实阶段提示 + 已接收字数）
+                  · 光标 = 已在出字、打字机还在追（`previewDisplay.printing`）
+                  判据用 `previewDisplay.text` 而不是 `previewText`：打字机滞后于 SSE，
+                  用累积值会让面板提前消失、出现短暂空白。 */}
+              {previewing && !previewDisplay.text && (
+                <AgentRunning
+                  title="智能体正在生成预览结果"
+                  hints={PREVIEW_HINTS}
+                  meta={configInfo.largeModelCode ? `大模型：${String(configInfo.largeModelCode)}` : undefined}
+                  height={430}
+                  padding={14}
+                />
               )}
-              <ThinkText text={previewDisplay.text} />
+              <ThinkText
+                text={previewDisplay.text}
+                tail={<StreamCaret show={previewing || previewDisplay.printing} />}
+              />
             </div>
             <Space style={{ marginTop: 8 }}>
               <Button danger onClick={stopPreviewStream} disabled={!previewing}>
@@ -1144,9 +1185,22 @@ export function KnowledgeConfigEditor({
           }}
         >
           {checking && !checkText && (
-            <Alert type="info" message="正在校验…" showIcon style={{ marginBottom: 8 }} />
+            <AgentRunning
+              title="智能体正在校验生成结果"
+              hints={CHECK_HINTS}
+              meta={checkModelCode ? `大模型：${checkModelCode}` : undefined}
+              height={380}
+              padding={14}
+            />
           )}
-          <ThinkText text={checkText} />
+          {/* ⚠️ 这一块**没有打字机**：源工程「校验结果」也是直接渲染（`contentProps2.finalText`），
+              所以光标只跟 `checking` 走，不涉及 `printing`。
+              🔴 同样要传 renderText（源工程是 `<md-msg :content="contentProps2.finalText">`）。 */}
+          <ThinkText
+            text={checkText}
+            renderText={(t) => <MarkdownText content={t} placeholder="" />}
+            tail={<StreamCaret show={checking} />}
+          />
         </div>
       </Modal>
     </>
