@@ -92,22 +92,42 @@ async function parseSseStream(
         return;
       }
 
+      // 先把"能不能解析成 JSON"这一步单独 try 掉。
+      // ⚠️ 业务错误必须**在 try 之外**抛：否则会被下面那个"非 JSON 帧当纯文本"的 catch
+      //    吞掉，反而把整段错误 JSON 当成正文打到界面上（2026-09-16 写这段时踩过）。
+      let json: Record<string, unknown> | null = null;
       try {
-        const json = JSON.parse(payload) as Record<string, unknown>;
-        const answer = json.answer;
-        const content = json.content;
-        const text = typeof answer === 'string' ? answer : typeof content === 'string' ? content : '';
-        if (!text) continue;
-        onChunk({
-          text,
-          prompt: typeof json.prompt === 'string' ? json.prompt : undefined,
-          promptTokens: typeof json.prompt_tokens === 'number' ? json.prompt_tokens : undefined,
-          completionTokens: typeof json.completion_tokens === 'number' ? json.completion_tokens : undefined,
-        });
+        json = JSON.parse(payload) as Record<string, unknown>;
       } catch {
+        json = null;
+      }
+      if (!json) {
         // 非 JSON 帧（例如后端直接 send(String)）按纯文本增量处理
         onChunk({ text: payload });
+        continue;
       }
+
+      // 🔴 业务错误帧（2026-09-16 新增）：正常增量帧恒为 `code: 200`
+      //（见后端 OpenAiChatUtil#consumeStream），一旦 `code !== 200` 就是服务端在报错。
+      // 此前这类帧没有 answer/content，被静默丢掉 → 前端表现为
+      //「HTTP 200、流正常结束、但一个字都没有」，**用户看不出是失败**。
+      // 典型场景：知识库未配置 → 后端推 `非法的大模型CODE:` → AI 分析整块消失。
+      if (typeof json.code === 'number' && json.code !== 200) {
+        const msg =
+          typeof json.message === 'string' && json.message ? json.message : `服务端返回异常（code=${json.code}）`;
+        throw new Error(msg);
+      }
+
+      const answer = json.answer;
+      const content = json.content;
+      const text = typeof answer === 'string' ? answer : typeof content === 'string' ? content : '';
+      if (!text) continue;
+      onChunk({
+        text,
+        prompt: typeof json.prompt === 'string' ? json.prompt : undefined,
+        promptTokens: typeof json.prompt_tokens === 'number' ? json.prompt_tokens : undefined,
+        completionTokens: typeof json.completion_tokens === 'number' ? json.completion_tokens : undefined,
+      });
     }
   }
 

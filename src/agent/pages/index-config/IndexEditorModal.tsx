@@ -28,6 +28,7 @@
  *      `codeMethod/codeNo` 是 **(CHAR+Auto) 或 (LIST+Manual)**；数据源面板是 **LIST+Auto**。
  */
 import { useCallback, useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
 import {
   AutoComplete,
   Button,
@@ -39,6 +40,7 @@ import {
   Radio,
   Row,
   Select,
+  Space,
   Switch,
   message,
 } from 'antd';
@@ -220,6 +222,42 @@ function toStr(v: unknown): string {
   return v === null || v === undefined ? '' : String(v);
 }
 
+/**
+ * 表单分区块（标题 + 卡片）——只为把「基本信息」从无分组的一堆字段里拎出来。
+ *
+ * 2026-09-16 布局优化说明：整屏弹窗里原先最上面直接是一格一格的字段（下面反倒有
+ * 「指标语义描述配置」「数据源配置」两个折叠面板标题），上下粗细不一致、看着散。
+ * 这里用**纯展示的壳**（不引入任何依赖、不改字段）给基本信息补一个同级的区块标题，
+ * 并把内容限宽居中，避免在超宽屏上单行输入框被拉到 800px+。
+ */
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div
+      style={{
+        border: '1px solid #f0f0f0',
+        borderRadius: 8,
+        overflow: 'hidden',
+        marginBottom: 16,
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '10px 16px',
+          background: '#fafafa',
+          borderBottom: '1px solid #f0f0f0',
+        }}
+      >
+        <span style={{ width: 3, height: 14, background: '#1677ff', borderRadius: 2 }} />
+        <span style={{ fontSize: 14, fontWeight: 600 }}>{title}</span>
+      </div>
+      <div style={{ padding: '16px 16px 0' }}>{children}</div>
+    </div>
+  );
+}
+
 export default function IndexEditorModal({ open, editType, row, parentGroup, onClose, onSuccess }: IndexEditorModalProps) {
   const [form, setForm] = useState<EditorForm>(EMPTY);
   /** 详情全量对象：保证编辑时不丢后端返回的其它字段 */
@@ -363,8 +401,16 @@ export default function IndexEditorModal({ open, editType, row, parentGroup, onC
   const clearParentParam = () => patch({ parentParamName: '', parentParamNo: '', scriptType: '', withModelSummary: false });
 
   const title = editType === 'add' ? '新增配置' : '更新配置';
-  const labelCol = { span: 6 };
-  const wrapperCol = { span: 16 };
+  /**
+   * 标签列用**固定宽度**（flex）而不是 `span`。
+   *
+   * 缘由（2026-09-16 布局优化）：原先用 `{ span: 6 }`，而每个字段又各自套在
+   * `<Col md={12}>` 里 —— 标签宽度 = 6/24 × 半个容器，随视口漂移：
+   * 宽屏下标签与控件之间被拉出几百像素空档、窄屏下 8 字标签（如「指标值获取方式」）
+   * 被压到换行。改成固定 120px 后，全屏/半屏下标签都对齐、都不换行。
+   */
+  const labelCol = { flex: '0 0 120px' };
+  const wrapperCol = { flex: '1 1 auto' };
 
   return (
     <Modal
@@ -391,20 +437,23 @@ export default function IndexEditorModal({ open, editType, row, parentGroup, onC
       okButtonProps={{ loading: saving }}
       confirmLoading={saving}
     >
-      <Form layout="horizontal" labelCol={labelCol} wrapperCol={wrapperCol} disabled={loading}>
-        {/* ── 基本信息（源模板 19~121 行：每项占 50%，两列） ── */}
-        <Row gutter={24}>
-          <Col md={12} sm={24}>
+      {/* 内容限宽居中：整屏弹窗在超宽屏上不再把单行控件拉到 800px+ */}
+      <div style={{ maxWidth: 1200, margin: '0 auto' }}>
+        <Form layout="horizontal" labelCol={labelCol} wrapperCol={wrapperCol} disabled={loading}>
+          {/* ── 基本信息（源模板 19~121 行；字段与顺序逐项对齐，仅重排栅格） ── */}
+          <Section title="基本信息">
+            <Row gutter={[20, 0]}>
+          <Col xs={24} md={12} xl={8}>
             <Form.Item label="指标编号">
               <Input placeholder="请输入指" value={form.paramID} onChange={(e) => patch({ paramID: e.target.value })} />
             </Form.Item>
           </Col>
-          <Col md={12} sm={24}>
+          <Col xs={24} md={12} xl={8}>
             <Form.Item label="指标名称" required>
               <Input placeholder="请输入" value={form.paramName} onChange={(e) => patch({ paramName: e.target.value })} />
             </Form.Item>
           </Col>
-          <Col md={12} sm={24}>
+          <Col xs={24} md={12} xl={8}>
             <Form.Item label="指标类型" required>
               <Select
                 showSearch
@@ -415,7 +464,7 @@ export default function IndexEditorModal({ open, editType, row, parentGroup, onC
               />
             </Form.Item>
           </Col>
-          <Col md={12} sm={24}>
+          <Col xs={24} md={12} xl={8}>
             <Form.Item label="指标值获取方式" required>
               <Select
                 showSearch
@@ -426,7 +475,7 @@ export default function IndexEditorModal({ open, editType, row, parentGroup, onC
               />
             </Form.Item>
           </Col>
-          <Col md={12} sm={24}>
+          <Col xs={24} md={12} xl={8}>
             <Form.Item label="输入形式" required>
               <Select
                 showSearch
@@ -439,7 +488,7 @@ export default function IndexEditorModal({ open, editType, row, parentGroup, onC
           </Col>
 
           {showReadOnly && (
-            <Col md={12} sm={24}>
+            <Col xs={24} md={12} xl={8}>
               <Form.Item label="是否只读">
                 <Radio.Group value={form.readOnly} onChange={(e) => patch({ readOnly: e.target.value })}>
                   <Radio value="Y">是</Radio>
@@ -449,14 +498,14 @@ export default function IndexEditorModal({ open, editType, row, parentGroup, onC
             </Col>
           )}
 
-          <Col md={12} sm={24}>
+          <Col xs={24} md={12} xl={8}>
             <Form.Item label="指标默认值">
               <Input placeholder="请输入" value={form.defaultValue} onChange={(e) => patch({ defaultValue: e.target.value })} />
             </Form.Item>
           </Col>
 
           {showInitMethod && (
-            <Col md={12} sm={24}>
+            <Col xs={24} md={12} xl={8}>
               <Form.Item label="初始化方法">
                 <Input placeholder="请输入" value={form.initMethod} onChange={(e) => patch({ initMethod: e.target.value })} />
               </Form.Item>
@@ -465,7 +514,7 @@ export default function IndexEditorModal({ open, editType, row, parentGroup, onC
 
           {showCodeConfig && (
             <>
-              <Col md={12} sm={24}>
+              <Col xs={24} md={12} xl={8}>
                 <Form.Item label="取值方式">
                   <Select
                     showSearch
@@ -477,7 +526,7 @@ export default function IndexEditorModal({ open, editType, row, parentGroup, onC
                   />
                 </Form.Item>
               </Col>
-              <Col md={12} sm={24}>
+              <Col xs={24} md={12} xl={8}>
                 <Form.Item label="取值字段">
                   <Input placeholder="请输入" value={form.codeNo} onChange={(e) => patch({ codeNo: e.target.value })} />
                 </Form.Item>
@@ -485,24 +534,21 @@ export default function IndexEditorModal({ open, editType, row, parentGroup, onC
             </>
           )}
 
-          <Col md={12} sm={24}>
+          {/* 父指标：源工程这里是 `width:300px` 的定宽输入框 + 一个图标按钮 + 清空。
+              定宽在半屏列里会把按钮挤到换行，改用 flex 自适应 + Space 收口（内容与行为不变）。 */}
+          <Col xs={24} md={12} xl={12}>
             <Form.Item label="父指标">
-              <Input
-                disabled
-                placeholder="请选择父指标"
-                value={form.parentParamName}
-                style={{ width: 300, marginRight: 8 }}
-              />
-              <Button type="primary" onClick={() => setParentPickerOpen(true)}>
-                选择
-              </Button>
-              <Button style={{ marginLeft: 8 }} onClick={clearParentParam}>
-                清空
-              </Button>
+              <Space.Compact style={{ width: '100%' }}>
+                <Input disabled placeholder="请选择父指标" value={form.parentParamName} />
+                <Button type="primary" onClick={() => setParentPickerOpen(true)}>
+                  选择
+                </Button>
+                <Button onClick={clearParentParam}>清空</Button>
+              </Space.Compact>
             </Form.Item>
           </Col>
 
-          <Col md={12} sm={24}>
+          <Col xs={24} md={12} xl={12}>
             <Form.Item label="是否启用大模型">
               <Switch
                 checked={form.withModelSummary}
@@ -512,7 +558,8 @@ export default function IndexEditorModal({ open, editType, row, parentGroup, onC
               />
             </Form.Item>
           </Col>
-        </Row>
+            </Row>
+          </Section>
 
         {/* ── 折叠面板：指标语义描述配置（源 124~201） ── */}
         <Collapse
@@ -523,9 +570,11 @@ export default function IndexEditorModal({ open, editType, row, parentGroup, onC
               key: 'semantic-config',
               label: '指标语义描述配置',
               children: (
-                <Row gutter={24}>
-                  <Col md={12} sm={24}>
-                    <Form.Item label="是否上线语义指标" labelCol={{ span: 8 }} wrapperCol={{ span: 16 }}>
+                <Row gutter={[20, 0]}>
+                  {/* 子项的 labelCol 覆盖已移除：统一继承外层 120px 定宽标签，
+                      原先每项写 `{span:8}` 在 3 列栅格下只有 ~130px，8 字标签会换行。 */}
+                  <Col xs={24} md={12} xl={8}>
+                    <Form.Item label="是否上线语义指标">
                       <Switch
                         checked={form.isOnline}
                         onChange={(v) => patch({ isOnline: v })}
@@ -534,8 +583,8 @@ export default function IndexEditorModal({ open, editType, row, parentGroup, onC
                       />
                     </Form.Item>
                   </Col>
-                  <Col md={12} sm={24}>
-                    <Form.Item label="数据样例" labelCol={{ span: 8 }} wrapperCol={{ span: 16 }}>
+                  <Col xs={24} md={12} xl={8}>
+                    <Form.Item label="数据样例">
                       <Input
                         placeholder="请输入数据样例，如：1234.56"
                         value={form.dataExample}
@@ -543,8 +592,8 @@ export default function IndexEditorModal({ open, editType, row, parentGroup, onC
                       />
                     </Form.Item>
                   </Col>
-                  <Col md={12} sm={24}>
-                    <Form.Item label="指标唯一标志" labelCol={{ span: 8 }} wrapperCol={{ span: 16 }}>
+                  <Col xs={24} md={12} xl={8}>
+                    <Form.Item label="指标唯一标志">
                       <Input
                         placeholder="请输入指标唯一标志"
                         value={form.paramKey}
@@ -552,8 +601,8 @@ export default function IndexEditorModal({ open, editType, row, parentGroup, onC
                       />
                     </Form.Item>
                   </Col>
-                  <Col md={12} sm={24}>
-                    <Form.Item label="数值单位" labelCol={{ span: 8 }} wrapperCol={{ span: 16 }}>
+                  <Col xs={24} md={12} xl={8}>
+                    <Form.Item label="数值单位">
                       <AutoComplete
                         allowClear
                         options={DATA_UNIT_OPTIONS}
@@ -563,8 +612,8 @@ export default function IndexEditorModal({ open, editType, row, parentGroup, onC
                       />
                     </Form.Item>
                   </Col>
-                  <Col md={12} sm={24}>
-                    <Form.Item label="数据类型" labelCol={{ span: 8 }} wrapperCol={{ span: 16 }}>
+                  <Col xs={24} md={12} xl={8}>
+                    <Form.Item label="数据类型">
                       <Select
                         showSearch
                         allowClear
@@ -576,8 +625,9 @@ export default function IndexEditorModal({ open, editType, row, parentGroup, onC
                       />
                     </Form.Item>
                   </Col>
-                  <Col md={12} sm={24}>
-                    <Form.Item label="指标介绍" labelCol={{ span: 8 }} wrapperCol={{ span: 16 }}>
+                  {/* 两个文本域保持两列（比其它字段宽一档，长文本更好读） */}
+                  <Col xs={24} md={12}>
+                    <Form.Item label="指标介绍">
                       <Input.TextArea
                         rows={4}
                         placeholder="请输入指标介绍，用于大模型语义检索匹配..."
@@ -586,8 +636,8 @@ export default function IndexEditorModal({ open, editType, row, parentGroup, onC
                       />
                     </Form.Item>
                   </Col>
-                  <Col md={12} sm={24}>
-                    <Form.Item label="数据内容解析" labelCol={{ span: 8 }} wrapperCol={{ span: 16 }}>
+                  <Col xs={24} md={12}>
+                    <Form.Item label="数据内容解析">
                       <Input.TextArea
                         rows={3}
                         placeholder="请输入数据内容解析，例如字段含义、解析规则、输出内容说明..."
@@ -693,7 +743,8 @@ export default function IndexEditorModal({ open, editType, row, parentGroup, onC
             ]}
           />
         )}
-      </Form>
+        </Form>
+      </div>
 
       {/* 父指标选择（源 `SelectIndexModal`，本工程复用 `IndexTreePicker`） */}
       <Modal

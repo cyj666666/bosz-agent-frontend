@@ -50,6 +50,7 @@ import {
 } from '../../api/indexConfig';
 import { FilterForm } from '../../components/FilterForm';
 import { useAgentTable } from '../../components/useAgentTable';
+import { useAutoQuery } from '../../components/useAutoQuery';
 import { IndexRelateInfoModal } from './IndexRelateInfoModal';
 import IndexEditorModal from './IndexEditorModal';
 
@@ -306,11 +307,22 @@ export default function IndexConfigList() {
 
   /* ---------------- 列表操作 ---------------- */
 
-  const doQuery = () => void refresh(buildParams(selectedGroup, filter));
+  const doQuery = useCallback(
+    () => void refresh(buildParams(selectedGroup, filter)),
+    [refresh, buildParams, selectedGroup, filter],
+  );
+
+  /**
+   * 条件一变就自动重查（免点「查询」）—— 详见 `components/useAutoQuery.ts`
+   *
+   * 本页四个筛选项（指标ID / 指标编号 / 指标名称 / 数据来源）**全是文本框**，
+   * 所以不传 `immediateFields`，统一走 400ms 防抖：边打字边查会打出一串请求、列表反复跳。
+   */
+  useAutoQuery(filter, doQuery);
 
   const doReset = () => {
-    setFilter(EMPTY_FILTER);
-    void refresh(buildParams(selectedGroup, EMPTY_FILTER));
+    // 只改条件，真正的查询由 useAutoQuery 触发；条件本来就空时不会多打一次请求
+    setFilter({ ...EMPTY_FILTER });
   };
 
   const requireOne = (): string | null => {

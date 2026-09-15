@@ -5,11 +5,14 @@
  * 左右两栏：左侧「检查项」表单，右侧「解析校验」。
  *
  * 与源工程的三处刻意差异（均不改变功能，只为贴合 React/宿主习惯）：
- *   1) **不做打字机效果**。源工程用 `PrintMixin` + tween.js 做逐字打印 + 自动滚动，
- *      属于纯视觉装饰；这里改为"收到即渲染"，流式内容一样是逐段出现的。
- *   2) **SSE 结束做双保险**（见 api/agentSse.ts 注释），源工程只认服务端下发的 `finished!`。
- *   3) **返回体判断**：源工程判 `res.success`，本工程由 agentRequest 统一校验 code 并解包，
+ *   1) **SSE 结束做双保险**（见 api/agentSse.ts 注释），源工程只认服务端下发的 `finished!`。
+ *   2) **返回体判断**：源工程判 `res.success`，本工程由 agentRequest 统一校验 code 并解包，
  *      这里只写 try/catch。
+ *   3) **AI分析 / 补充分析增补三处可观测性**（2026-09-16，源工程没有）：
+ *      ① 出错把原因显示出来（源工程出错时整块消失，看不出是失败）；
+ *      ② 流结束但一个字都没收到 → 明确提示；
+ *      ③ 重新生成时保留上一次结果，不再整块刷白重打。
+ *      （打字机效果 `useTypewriter` 与源 `PrintMixin` 对齐，非差异。）
  *
  * 校验前置条件（照抄源工程，别"优化"掉，否则用户会拿到莫名其妙的报错）：
  *   - 解析前必须填「阈值设定」（源工程就用阈值去调解析接口）
@@ -19,6 +22,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Key } from 'react';
 import { Button, Card, Col, Collapse, Empty, Form, Input, Modal, Row, Select, Space, Tree, message } from 'antd';
 import type { TreeDataNode } from 'antd';
+import { CheckCircleFilled, WarningFilled } from '@ant-design/icons';
 import {
   executeRule as apiExecuteRule,
   getSupplementaryOptions,
@@ -119,13 +123,33 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
   const [matchedMetrics, setMatchedMetrics] = useState<RuleMetricItem[]>([]);
   const [executeResult, setExecuteResult] = useState<boolean | string | null>(null);
 
+  /**
+   * 补充分析：**值里带名称**（对齐源工程 `label-in-value`）
+   *
+   * 源件 `supplementaryValue` 是 `{ key, label }` 对象，保存时 `additionalAnalysis` 取 key、
+   * `additionalAnalysisName` 取 label，界面上显示的也是 label。
+   * 本工程原先只存 code、靠 Select 的 `options` 反查名称 —— **一旦该 code 不在当前选项列表里**
+   * （列表分页 / 关键词筛选 / 角色授权变化 / 反查失败），antd 就会直接把原始值打出来，
+   * 于是界面上看到的是**码值**（用户 2026-09-16 反馈的问题）。改成对象后显示不再依赖选项列表。
+   */
   const [suppOptions, setSuppOptions] = useState<SupplementaryOption[]>([]);
-  const [suppValue, setSuppValue] = useState<string | undefined>(undefined);
+  const [suppValue, setSuppValue] = useState<{ value: string; label: string } | undefined>(undefined);
 
+  /**
+   * 两份文本：
+   *   · `aiText` / `sText`  = SSE 累积的**完整目标文本**（每次开流清空，喂给打字机）；
+   *   · `aiShown` / `sShown` = **界面实际展示的**文本 —— 只有新内容到达时才顶上。
+   * 分开的原因（用户反馈"再次点击会先刷成空白再重新打字"）：若直接用累积值做展示，
+   * 开流瞬间会先清空 → 整块刷白，然后才逐字重打。保留上一次结果视觉上更连续。
+   */
   const [aiText, setAiText] = useState('');
+  const [aiShown, setAiShown] = useState('');
   const [aiSending, setAiSending] = useState(false);
+  const [aiError, setAiError] = useState('');
   const [sText, setSText] = useState('');
+  const [sShown, setSShown] = useState('');
   const [sSending, setSSending] = useState(false);
+  const [sError, setSError] = useState('');
 
   /**
    * 打字机（源 `views/knowledge/components/printMixin.js`）
@@ -134,8 +158,16 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
    * 这里由 `useTypewriter` 负责逐字"追"出来给界面显示（相当于源件的 `finalText`）。
    * 关闭时传 `enabled: false` 即退化为"收到即渲染"。
    */
-  const aiDisplay = useTypewriter(aiText);
-  const sDisplay = useTypewriter(sText);
+  const aiDisplay = useTypewriter(aiShown);
+  const sDisplay = useTypewriter(sShown);
+
+  /** 新内容一到就顶上展示值；`aiText` 为空（刚开流）时保留上一次结果，避免整块刷白 */
+  useEffect(() => {
+    if (aiText) setAiShown(aiText);
+  }, [aiText]);
+  useEffect(() => {
+    if (sText) setSShown(sText);
+  }, [sText]);
 
   const [indexTree, setIndexTree] = useState<IndexTreeNode[]>([]);
   const [indexKeyword, setIndexKeyword] = useState('');
@@ -160,7 +192,11 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
     setThresholdParseMessage('');
     setSuppValue(undefined);
     setAiText('');
+    setAiShown('');
+    setAiError('');
     setSText('');
+    setSShown('');
+    setSError('');
     setIndexKeyword('');
     aiAbortRef.current?.abort();
     sAbortRef.current?.abort();
@@ -190,13 +226,13 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
       setSuppOptions(list);
       if (code) {
         const hit = list.find((o) => o.paramNo === code);
-        setSuppValue(code);
-        patch({ additionalAnalysisName: hit ? hit.paramName : code });
+        // 反查不到就退回 code 当名称（源工程同款降级：`label: item ? item.paramName : code`）
+        setSuppValue({ value: code, label: hit ? hit.paramName : code });
       }
     } catch {
       setSuppOptions([]);
     }
-  }, [patch]);
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -219,7 +255,14 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
         additionalAnalysisName: oldData.additionalAnalysisName ?? '',
       });
       restoreParams(oldData.requestParams ?? '');
-      setSuppValue(oldData.additionalAnalysis || undefined);
+      // 补充分析：先用**库里的名称**兜底（列表接口还没回来时也能显示名称，而不是码值），
+      // 随后 loadSuppOptions 会用选项列表里的名称刷新一次。源工程同样保留
+      // additionalAnalysisName 字段做这个兜底。
+      setSuppValue(
+        oldData.additionalAnalysis
+          ? { value: oldData.additionalAnalysis, label: oldData.additionalAnalysisName || oldData.additionalAnalysis }
+          : undefined,
+      );
       void loadSuppOptions('', oldData.additionalAnalysis || undefined);
       if (parsed) {
         if (parsed.includes('未解析到')) {
@@ -360,10 +403,23 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
 
   const entName = useMemo(() => (params.find((p) => p.fieldName === 'entName')?.fieldValue ?? '').trim(), [params]);
 
+  /**
+   * AI 分析（源工程 `aiAnalysisPostText`，moduleCode 写死 `IntelligentStrategyEngine`）
+   *
+   * 🔴 三处**必须区分"失败"和"空结果"**（2026-09-16 修复）：
+   *   1. 开流只清 `aiText`（累积值），**不动 `aiShown`** → 不再整块刷白；
+   *   2. 流结束时若一个字都没收到 → 明确提示（此前表现为"整块凭空消失"，看着像功能没做）；
+   *   3. 出错把原因显示出来 —— 后端在 `large_model_code` 为空时会推一帧
+   *      `{"code":500,"message":"非法的大模型CODE:"}`（知识库未配置即属此类），
+   *      `agentSse` 现已识别该帧并抛错，这里落到 `aiError` 上。
+   */
   const startAiAnalysis = (result: RuleExecuteResult) => {
     aiAbortRef.current?.abort();
     setAiText('');
+    setAiError('');
     setAiSending(true);
+    let received = false;
+    let errored = false;
     aiAbortRef.current = agentSse({
       url: '/agent/get',
       body: {
@@ -380,9 +436,21 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
         withModelSummary: true,
         finishFlag: 'true',
       },
-      onChunk: (c) => setAiText((prev) => prev + c.text),
-      onDone: () => setAiSending(false),
-      onError: () => setAiSending(false),
+      onChunk: (c) => {
+        received = true;
+        setAiText((prev) => prev + c.text);
+      },
+      onDone: () => {
+        setAiSending(false);
+        if (!received && !errored) {
+          setAiError('服务端没有返回任何内容（多为该知识库未配置提示词 / 模型编码，请到「知识配置」里补一份）');
+        }
+      },
+      onError: (e) => {
+        errored = true;
+        setAiSending(false);
+        setAiError((e as Error)?.message || 'AI 分析失败');
+      },
     });
   };
 
@@ -390,20 +458,33 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
     if (!suppValue) return;
     sAbortRef.current?.abort();
     setSText('');
+    setSError('');
     setSSending(true);
+    let received = false;
+    let errored = false;
     sAbortRef.current = agentSse({
       url: '/agent/get',
       body: {
-        moduleCode: suppValue,
+        moduleCode: suppValue.value,
         entName,
         factExpression: factExpression || '',
         stream: true,
         withModelSummary: true,
         finishFlag: 'true',
       },
-      onChunk: (c) => setSText((prev) => prev + c.text),
-      onDone: () => setSSending(false),
-      onError: () => setSSending(false),
+      onChunk: (c) => {
+        received = true;
+        setSText((prev) => prev + c.text);
+      },
+      onDone: () => {
+        setSSending(false);
+        if (!received && !errored) setSError('服务端没有返回任何内容');
+      },
+      onError: (e) => {
+        errored = true;
+        setSSending(false);
+        setSError((e as Error)?.message || '补充分析失败');
+      },
     });
   };
 
@@ -477,8 +558,9 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
         factAnalysis: form.factAnalysis,
         riskRemark: form.riskInterpretation,
         disposalAdvice: form.disposalSuggestion,
-        additionalAnalysis: suppValue || '',
-        additionalAnalysisName: suppOptions.find((o) => o.paramNo === suppValue)?.paramName || '',
+        // 源工程：additionalAnalysis = supplementaryValue.key，additionalAnalysisName = supplementaryValue.label
+        additionalAnalysis: suppValue?.value || '',
+        additionalAnalysisName: suppValue?.label || '',
         requestParams: fieldNames.length ? JSON.stringify(fieldNames) : '',
       });
       message.success('保存成功');
@@ -721,15 +803,24 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
             />
 
             <Form.Item label="补充分析" style={{ marginTop: 12, marginBottom: 12 }}>
+              {/* `labelInValue`：对齐源工程的 `label-in-value`，显示用 label（名称）而不是 value（码值） */}
               <Select
                 allowClear
                 showSearch
+                labelInValue
                 placeholder="请选择补充分析"
                 style={{ width: '100%' }}
                 value={suppValue}
                 filterOption={false}
                 onSearch={(v) => void loadSuppOptions(v)}
-                onChange={(v) => setSuppValue(v)}
+                onChange={(v) => {
+                  const item = v as { value?: unknown; label?: unknown } | null | undefined;
+                  setSuppValue(
+                    item && item.value !== undefined && item.value !== null
+                      ? { value: String(item.value), label: String(item.label ?? item.value) }
+                      : undefined,
+                  );
+                }}
                 options={suppOptions.map((o) => ({ label: o.paramName, value: o.paramNo }))}
               />
             </Form.Item>
@@ -752,13 +843,32 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
             {params.map((p, i) => (
               <Row gutter={8} key={i} style={{ marginBottom: 8 }}>
                 <Col flex="auto">
-                  <Input
-                    placeholder="字段名"
-                    value={p.fieldName}
-                    onChange={(e) =>
-                      setParams((prev) => prev.map((x, xi) => (xi === i ? { ...x, fieldName: e.target.value } : x)))
-                    }
-                  />
+                  {p.fieldName === 'entName' ? (
+                    /* 对齐源工程（`RuleFormModal.vue` 模板 320~328 行）：entName 这一行的
+                       **字段名是只读文本**，只有「值」（企业名称）可填 —— 原先做成了可编辑输入框，
+                       用户能误改字段名导致校验取不到企业名。 */
+                    <div
+                      style={{
+                        height: 32,
+                        lineHeight: '30px',
+                        paddingInlineStart: 11,
+                        color: 'rgba(0, 0, 0, 0.65)',
+                        background: '#fafafa',
+                        border: '1px solid #d9d9d9',
+                        borderRadius: 6,
+                      }}
+                    >
+                      entName
+                    </div>
+                  ) : (
+                    <Input
+                      placeholder="字段名"
+                      value={p.fieldName}
+                      onChange={(e) =>
+                        setParams((prev) => prev.map((x, xi) => (xi === i ? { ...x, fieldName: e.target.value } : x)))
+                      }
+                    />
+                  )}
                 </Col>
                 <Col flex="auto">
                   <Input
@@ -801,6 +911,9 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
             <div style={{ marginTop: 20, marginBottom: 8, color: '#595959' }}>校验结果</div>
             <div
               style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
                 padding: '10px 16px',
                 borderRadius: 4,
                 background: '#fafafa',
@@ -809,32 +922,58 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
                 fontWeight: 600,
               }}
             >
-              {resultText}
-              {aiSending ? '（AI 分析生成中…）' : ''}
+              {/* 对齐源工程：命中 = 黄色告警图标；未命中 = 绿色通过图标（`result-panel` 的 hit/miss） */}
+              {executeResult === true && <WarningFilled />}
+              {executeResult === false && <CheckCircleFilled />}
+              <span>{resultText}</span>
             </div>
 
-            {(aiText || aiSending) && (
+            {/* AI分析：块的出现条件与源工程一致（`finalText || sending`），并额外保留**错误态**，
+                避免"失败了却整块消失"，让用户以为功能不存在（2026-09-16 修复）。 */}
+            {(aiSending || aiShown || aiError) && (
               <>
                 <div style={{ marginTop: 20, marginBottom: 8, color: '#595959' }}>AI分析</div>
                 <div style={{ border: '1px solid #f0f0f0', borderRadius: 4, padding: 8, maxHeight: 320, overflow: 'auto' }}>
-                  {/* 后端 enable_think=true 时会把思考内容用 <think>…</think> 包起来一起推，
-                      这里交给 ThinkText 折叠显示（不渲染的话页面上会看到裸露的标签） */}
-                  <ThinkText
-                    text={aiDisplay.text}
-                    renderText={(t) => <MarkdownText content={t} placeholder={aiSending ? '生成中…' : '-'} />}
-                  />
+                  {aiError ? (
+                    <div style={{ color: '#ff4d4f' }}>{aiError}</div>
+                  ) : (
+                    <>
+                      {/* 源工程这里是 loading.gif；本工程没有该资源，用文字占位表达同一状态 */}
+                      {aiSending && !aiText && (
+                        <div style={{ color: '#8c8c8c' }}>{aiShown ? '重新生成中…' : '生成中…'}</div>
+                      )}
+                      {/* 后端 enable_think=true 时会把思考内容用 <think>…</think> 包起来一起推，
+                          这里交给 ThinkText 折叠显示（不渲染的话页面上会看到裸露的标签） */}
+                      <ThinkText
+                        text={aiDisplay.text}
+                        renderText={(t) => <MarkdownText content={t} placeholder={aiSending ? '生成中…' : '-'} />}
+                      />
+                    </>
+                  )}
                 </div>
               </>
             )}
 
-            {suppValue && (sText || sSending) && (
+            {/* 补充分析：**选中即出现**（对齐源工程 `v-if="supplementaryValue"`），
+                原先要求"有文本或在生成中"才渲染 → 刚选完看不到这一块。 */}
+            {suppValue && (
               <>
                 <div style={{ marginTop: 20, marginBottom: 8, color: '#595959' }}>补充分析</div>
                 <div style={{ border: '1px solid #f0f0f0', borderRadius: 4, padding: 8, maxHeight: 320, overflow: 'auto' }}>
-                  <ThinkText
-                    text={sDisplay.text}
-                    renderText={(t) => <MarkdownText content={t} placeholder={sSending ? '生成中…' : '-'} />}
-                  />
+                  {sError ? (
+                    <div style={{ color: '#ff4d4f' }}>{sError}</div>
+                  ) : (
+                    <>
+                      {sSending && !sText && (
+                        <div style={{ color: '#8c8c8c' }}>{sShown ? '重新生成中…' : '生成中…'}</div>
+                      )}
+                      {!sSending && !sShown && <div style={{ color: '#8c8c8c' }}>点「开始校验」后生成</div>}
+                      <ThinkText
+                        text={sDisplay.text}
+                        renderText={(t) => <MarkdownText content={t} placeholder={sSending ? '生成中…' : '-'} />}
+                      />
+                    </>
+                  )}
                 </div>
               </>
             )}

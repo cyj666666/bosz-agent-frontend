@@ -43,6 +43,7 @@ import {
 } from '../../api/knowledgeConfig';
 import { FilterForm } from '../../components/FilterForm';
 import { useAgentTable } from '../../components/useAgentTable';
+import { useAutoQuery } from '../../components/useAutoQuery';
 import KnowledgeEditorModal from './KnowledgeEditorModal';
 import { KnowledgeConfigEditor } from './KnowledgeConfigEditor';
 import { TargetConfigModal } from './TargetConfigModal';
@@ -290,11 +291,21 @@ export default function KnowledgeConfigList() {
     return String(rowKeys[0]);
   };
 
-  const doQuery = () => void refresh(buildParams(selectedGroupId, filter, selectedGroup));
+  const doQuery = useCallback(
+    () => void refresh(buildParams(selectedGroupId, filter, selectedGroup)),
+    [refresh, buildParams, selectedGroupId, selectedGroup, filter],
+  );
+
+  /**
+   * 条件一变就自动重查（免点「查询」）—— 详见 `components/useAutoQuery.ts`
+   *
+   * 「验收状态」「上线状态」是下拉 → 立即查；「知识库编号 / 名称」是文本框 → 400ms 防抖。
+   */
+  useAutoQuery(filter, doQuery, { immediateFields: ['paramStatus', 'online'] });
 
   const doReset = () => {
-    setFilter(EMPTY_FILTER);
-    void refresh(buildParams(selectedGroupId, EMPTY_FILTER, selectedGroup));
+    // 只改条件，真正的查询由 useAutoQuery 触发；条件本来就空时不会多打一次请求
+    setFilter({ ...EMPTY_FILTER });
   };
 
   const doDelete = async () => {

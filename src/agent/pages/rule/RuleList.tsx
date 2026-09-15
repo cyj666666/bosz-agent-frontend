@@ -18,6 +18,7 @@ import { deleteRule, getRuleList, getTopicSelect, updateRuleStatus } from '../..
 import { FilterForm } from '../../components/FilterForm';
 import type { FilterField } from '../../components/FilterForm';
 import { useAgentTable } from '../../components/useAgentTable';
+import { useAutoQuery } from '../../components/useAutoQuery';
 import type { RuleItem, RuleListQuery, TopicOption, TopicPair } from '../../types';
 import RuleFormModal from './RuleFormModal';
 
@@ -46,6 +47,24 @@ const EMPTY_SEARCH: SearchState = {
   topicValues: [],
 };
 
+/**
+ * 把 TreeSelect 的选中值归一成 `topic1|topic2` 字符串。
+ *
+ * ⚠️ **两种形态都要接住**（2026-09-16 自测踩坑后加）：
+ *   - 默认写法（`treeCheckStrictly` 不传 = false，**源工程就是这一种**）→ 值就是 `string[]`；
+ *   - 一旦打开 `treeCheckStrictly` → antd 回传的是 `{ value, label, halfChecked }` **对象数组**。
+ * 上一版只判 `typeof v === 'string'`，遇到对象形态就整批 `return`，
+ * 于是 `topicPairList` 恒为空 → **「主题」筛选静默失效**（选了没反应、也不报错）。
+ * 这里两头都兼容，避免以后再被同一个坑绊倒。
+ */
+function normalizeTopicValue(v: unknown): string {
+  if (typeof v === 'string') return v;
+  if (v && typeof v === 'object' && 'value' in v) {
+    return String((v as { value: unknown }).value ?? '');
+  }
+  return '';
+}
+
 export default function RuleList() {
   const [search, setSearch] = useState<SearchState>(EMPTY_SEARCH);
   const [topics, setTopics] = useState<TopicOption[]>([]);
@@ -61,8 +80,10 @@ export default function RuleList() {
    */
   const buildParams = useCallback((cond: SearchState): Partial<RuleListQuery> => {
     const pairs: TopicPair[] = [];
-    cond.topicValues.forEach((v) => {
-      if (typeof v !== 'string' || v.startsWith('group_')) return;
+    cond.topicValues.forEach((raw) => {
+      const v = normalizeTopicValue(raw);
+      // 一级节点的值带 `group_` 前缀（只是用来区分层级），提交时只保留二级组合
+      if (!v || v.startsWith('group_')) return;
       const parts = v.split('|');
       if (parts.length !== 2) return;
       if (!pairs.some((p) => p.topic1 === parts[0] && p.topic2 === parts[1])) {
@@ -70,8 +91,8 @@ export default function RuleList() {
       }
     });
     return {
-      ruleName: cond.ruleName || undefined,
-      ruleCode: cond.ruleCode || undefined,
+      ruleName: cond.ruleName.trim() || undefined,
+      ruleCode: cond.ruleCode.trim() || undefined,
       ruleStatus: cond.ruleStatus || undefined,
       startTime: cond.dateRange?.[0] ? dayjs(cond.dateRange[0]).format('YYYY-MM-DD') : undefined,
       endTime: cond.dateRange?.[1] ? dayjs(cond.dateRange[1]).format('YYYY-MM-DD') : undefined,
@@ -92,7 +113,17 @@ export default function RuleList() {
       .catch(() => setTopics([]));
   }, []);
 
-  /** 主题树：一级用 `group_` 前缀与二级区分，选中后只取二级组合成 topicPairList */
+  /**
+   * 主题树：一级用 `group_` 前缀与二级区分，选中后只取二级组合成 topicPairList
+   *
+   * 🔴 **这里不要加 `treeCheckStrictly`**（2026-09-16 修复）：
+   *   源工程 `app/rule/List.vue` 写的是 `:tree-check-strictly="false"`，即**父子联动**的默认行为；
+   *   上一版漏看了这一行、直接写了 `treeCheckStrictly`（= true），两个后果：
+   *     ① 打开 strict 后 antd 回传的是 `{value,label,halfChecked}` 对象数组，
+   *        而 `buildParams` 只认字符串 → **主题筛选静默失效**；
+   *     ② 交互也和源工程不一致（strict 下父子不联动）。
+   * `showCheckedStrategy={SHOW_CHILD}` 与源工程默认策略一致（只回传叶子节点值），保留。
+   */
   const treeData = topics.map((t) => ({
     value: `group_${t.topic1}`,
     title: t.topic1,
@@ -141,18 +172,25 @@ export default function RuleList() {
           treeCheckable
           allowClear
           showCheckedStrategy={TreeSelect.SHOW_CHILD}
-          treeCheckStrictly
           treeDefaultExpandAll
         />
       ),
     },
   ];
 
-  const doQuery = () => void refresh(buildParams(search));
+  const doQuery = useCallback(() => void refresh(buildParams(search)), [refresh, buildParams, search]);
+
+  /**
+   * 条件一变就自动重查（免点「查询」）—— 详见 `components/useAutoQuery.ts`
+   *
+   * 「状态」下拉、「更新日期」区间属于"选完即提交"的控件 → 立即查（与源工程一致）；
+   * 文字检索与「主题」多选树 → 防抖 400ms（逐字/每勾一次都查会打出一串请求）。
+   */
+  useAutoQuery(search, doQuery, { immediateFields: ['ruleStatus', 'dateRange'] });
 
   const doReset = () => {
-    setSearch(EMPTY_SEARCH);
-    void refresh(buildParams(EMPTY_SEARCH));
+    // 只改条件，真正的查询由 useAutoQuery 触发；条件本来就空时不会多打一次请求
+    setSearch({ ...EMPTY_SEARCH });
   };
 
   /** 启用/停用：成功后只改本地行数据，不整表重刷（与源工程一致，避免翻页位置跳动） */

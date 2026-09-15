@@ -944,14 +944,31 @@ export function IndexDataSourceCard({
         </div>
       )}
 
-      {/* ===== 预览 ===== */}
+      {/* ===== 预览 =====
+          尺寸优化（2026-09-16 用户反馈"弹框太小、看数据不方便"）：
+          - 宽度 1200 → **90vw（上限 1680px）**：列多时不再一屏只挤下四五列；
+          - 高度不再写死 `y: 600`，改为 **随视口自适应** `calc(100vh - 220px)`；
+          - 弹框贴顶 24px（antd 默认 100px，高弹框会白占一截，底部容易被挤到屏幕外）；
+          - 表体上下留白收窄，把纵向空间让给数据；
+          - 标题带**行列数**，列宽用 `max-content`（按内容自适应，真放不下才横向滚动）。
+          ⚠️ 源工程 `SqlPreviewModal.vue` 是固定 `width=1200` + `scroll={x:1000, y:600}`，
+             也即"小弹框"是源设计；本次是**用户明确要求的放宽**，非移植偏差。 */}
       <Modal
         open={previewOpen}
-        title="查询结果"
-        width={1200}
+        title={
+          <Space size={10}>
+            <span>查询结果</span>
+            <span style={{ fontSize: 12, fontWeight: 400, color: 'rgba(0, 0, 0, 0.45)' }}>
+              共 {(previewResult.dataList ?? []).length} 行 · {(previewResult.tableHeaders ?? []).length} 列
+            </span>
+          </Space>
+        }
+        width="90vw"
+        style={{ top: 24, maxWidth: 1680, paddingBottom: 0 }}
+        styles={{ body: { padding: '12px 16px 0' } }}
         footer={<Button onClick={() => setPreviewOpen(false)}>关闭</Button>}
         onCancel={() => setPreviewOpen(false)}
-        destroyOnClose
+        destroyOnHidden
       >
         <Table<Record<string, unknown>>
           rowKey={(_row, index) => String(index)}
@@ -960,7 +977,7 @@ export function IndexDataSourceCard({
           columns={previewColumns}
           dataSource={(previewResult.dataList ?? []) as Record<string, unknown>[]}
           pagination={false}
-          scroll={{ x: 1000, y: 600 }}
+          scroll={{ x: 'max-content', y: 'calc(100vh - 220px)' }}
           locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="无数据" /> }}
         />
       </Modal>
