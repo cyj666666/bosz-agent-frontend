@@ -14,9 +14,9 @@
  *        —— 源工程 `utils/sse.js` 的 `defaultRequestUrl` 正是这个地址，
  *        且 `sendSse` 是 GET（EventSource），故本工程用 `agentSseGet` 而非 `agentSse`。
  *
- * ── 一处刻意的实现差异（已在代码内标注）──
- * **打字机效果未复刻**：源工程用 `printMixin` + `tween.js` 逐字打印；
- * React 侧改为「收到即渲染」。纯视觉装饰，不影响数据与流程。
+ * ── 打字机效果（已实现）──
+ * 源工程用 `printMixin` + `tween.js` 把流式文本逐字打印出来；
+ * React 侧用 `components/useTypewriter.ts` 等价实现（按积压字数分档调速）。
  *
  * ── 字典动态表单（已实现，不再降级）──
  * 源工程对 `relateDictValue` 有值的行用 `AdFormRender`（宿主通用动态表单）按字典结构渲染控件。
@@ -33,6 +33,7 @@ import { agentSseGet } from '../../api/agentSse';
 import type { AgentSseHandle } from '../../api/agentSse';
 import { AdFormRenderer } from '../../components/AdFormRenderer';
 import type { AdFormOption, AdFormRendererHandle } from '../../components/AdFormRenderer';
+import { useTypewriter } from '../../components/useTypewriter';
 
 export interface BlackBoxConfigModalProps {
   open: boolean;
@@ -96,6 +97,13 @@ export function BlackBoxConfigModal({
   const [previewText, setPreviewText] = useState('');
   const [sending, setSending] = useState(false);
   const sseRef = useRef<AgentSseHandle | null>(null);
+  /**
+   * 打字机（源 `views/knowledge/components/printMixin.js`）
+   *
+   * `previewText` 是 GET-SSE 累积的**完整文本**（源件的 `resContent`），
+   * 这里逐字"追"出来显示（源件的 `finalText`）。
+   */
+  const previewDisplay = useTypewriter(previewText);
 
   /**
    * 每行的动态表单实例（对应源工程的 `$refs["formRef" + record.id]`）
@@ -351,7 +359,7 @@ export function BlackBoxConfigModal({
           />
           <div style={{ marginTop: 12, height: 300, overflow: 'auto', border: '1px solid #d9d9d9', borderRadius: 4, padding: 6 }}>
             {sending && !previewText && <Alert type="info" message="正在生成…" showIcon style={{ marginBottom: 8 }} />}
-            <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{previewText}</div>
+            <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{previewDisplay.text}</div>
           </div>
         </Col>
       </Row>

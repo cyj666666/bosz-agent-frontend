@@ -10,22 +10,32 @@
  *   统一校验 code 并解包到 data，所以本页**只写 try/catch，不再判 success**。
  */
 import { useCallback, useEffect, useState } from 'react';
-import { Button, Card, DatePicker, Form, Input, Popconfirm, Select, Space, Switch, Table, Tooltip, TreeSelect, message } from 'antd';
+import { Button, Card, DatePicker, Popconfirm, Space, Switch, Table, Tooltip, TreeSelect, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
 import { deleteRule, getRuleList, getTopicSelect, updateRuleStatus } from '../../api/rule';
-import type { RuleItem, TopicOption, TopicPair } from '../../types';
+import { FilterForm } from '../../components/FilterForm';
+import type { FilterField } from '../../components/FilterForm';
+import { useAgentTable } from '../../components/useAgentTable';
+import type { RuleItem, RuleListQuery, TopicOption, TopicPair } from '../../types';
 import RuleFormModal from './RuleFormModal';
 
 const { RangePicker } = DatePicker;
 
+/**
+ * 查询条件
+ *
+ * ⚠️ 主题这里存的是**树选择器的原始值**（`topic1|topic2` 字符串数组），
+ *    请求要的 `topicPairList` 由 `buildParams` 现场拆出来 —— 只留一份真相，
+ *    避免"选择器的值"和"已选的 pair"两处状态不一致（源工程是两处各存一份）。
+ */
 interface SearchState {
   ruleName: string;
   ruleCode: string;
   ruleStatus: string;
   dateRange: [Dayjs, Dayjs] | null;
-  topicPairs: TopicPair[];
+  topicValues: string[];
 }
 
 const EMPTY_SEARCH: SearchState = {
@@ -33,54 +43,47 @@ const EMPTY_SEARCH: SearchState = {
   ruleCode: '',
   ruleStatus: '',
   dateRange: null,
-  topicPairs: [],
+  topicValues: [],
 };
 
 export default function RuleList() {
-  const [rows, setRows] = useState<RuleItem[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [pageIndex, setPageIndex] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
-
   const [search, setSearch] = useState<SearchState>(EMPTY_SEARCH);
   const [topics, setTopics] = useState<TopicOption[]>([]);
-  const [topicValues, setTopicValues] = useState<string[]>([]);
-
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<RuleItem | null>(null);
 
-  /** 拉列表。传参显式化，避免"依赖 search 但只改了分页"时拿到旧条件 */
-  const fetchList = useCallback(
-    async (page: number, size: number, cond: SearchState) => {
-      setLoading(true);
-      try {
-        const res = await getRuleList({
-          ruleName: cond.ruleName || undefined,
-          ruleCode: cond.ruleCode || undefined,
-          ruleStatus: cond.ruleStatus || undefined,
-          startTime: cond.dateRange?.[0] ? dayjs(cond.dateRange[0]).format('YYYY-MM-DD') : undefined,
-          endTime: cond.dateRange?.[1] ? dayjs(cond.dateRange[1]).format('YYYY-MM-DD') : undefined,
-          topicPairList: cond.topicPairs.length ? cond.topicPairs : undefined,
-          pageIndex: page,
-          pageSize: size,
-        });
-        setRows(res?.list ?? []);
-        setTotal(res?.totalCount ?? 0);
-      } catch (e) {
-        message.error((e as Error)?.message || '检查项列表加载失败');
-      } finally {
-        setLoading(false);
+  /**
+   * 查询条件 → 请求参数
+   *
+   * 照抄源 `queryHandle`：**只带非空项**（空值给 `undefined`，序列化时自然消失）。
+   * ⚠️ 文字检索对应的字段名是 **`ruleName`**（源工程 `params.ruleName = searchForm.checkItemSearch`），
+   *    不是搜索框标签里的"检查项检索"。
+   */
+  const buildParams = useCallback((cond: SearchState): Partial<RuleListQuery> => {
+    const pairs: TopicPair[] = [];
+    cond.topicValues.forEach((v) => {
+      if (typeof v !== 'string' || v.startsWith('group_')) return;
+      const parts = v.split('|');
+      if (parts.length !== 2) return;
+      if (!pairs.some((p) => p.topic1 === parts[0] && p.topic2 === parts[1])) {
+        pairs.push({ topic1: parts[0], topic2: parts[1] });
       }
-    },
-    [],
-  );
+    });
+    return {
+      ruleName: cond.ruleName || undefined,
+      ruleCode: cond.ruleCode || undefined,
+      ruleStatus: cond.ruleStatus || undefined,
+      startTime: cond.dateRange?.[0] ? dayjs(cond.dateRange[0]).format('YYYY-MM-DD') : undefined,
+      endTime: cond.dateRange?.[1] ? dayjs(cond.dateRange[1]).format('YYYY-MM-DD') : undefined,
+      topicPairList: pairs.length ? pairs : undefined,
+    };
+  }, []);
 
-  useEffect(() => {
-    void fetchList(pageIndex, pageSize, search);
-    // 仅在分页变化时重查；条件变化由「查询」按钮显式触发
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pageIndex, pageSize]);
+  /** 列表：分页 / 请求参数 / 加载态 / 过期响应丢弃统一由 hook 负责 */
+  const { rows, loading, pagination, refresh, reload, setRows } = useAgentTable<
+    RuleItem,
+    Omit<RuleListQuery, 'pageIndex' | 'pageSize'>
+  >(getRuleList, { errorText: '检查项列表加载失败' });
 
   // 主题选项：一次加载，结构为 [{topic1, topic2List:[...]}]
   useEffect(() => {
@@ -96,30 +99,60 @@ export default function RuleList() {
     children: (t.topic2List ?? []).map((t2) => ({ value: `${t.topic1}|${t2}`, title: t2 })),
   }));
 
-  const onTopicChange = (values: string[]) => {
-    setTopicValues(values);
-    const pairs: TopicPair[] = [];
-    values.forEach((v) => {
-      if (typeof v !== 'string' || v.startsWith('group_')) return;
-      const parts = v.split('|');
-      if (parts.length !== 2) return;
-      if (!pairs.some((p) => p.topic1 === parts[0] && p.topic2 === parts[1])) {
-        pairs.push({ topic1: parts[0], topic2: parts[1] });
-      }
-    });
-    setSearch((prev) => ({ ...prev, topicPairs: pairs }));
-  };
+  /** 搜索区字段（源工程是自己写的一段 inline form，这里用通用 FilterForm 表达） */
+  const filterFields: FilterField[] = [
+    { field: 'ruleName', label: '检查项检索', placeholder: '请输入规则名称/描述检索关键词', width: 240 },
+    { field: 'ruleCode', label: '规则编号', placeholder: '请输入规则Code', width: 180 },
+    {
+      field: 'ruleStatus',
+      label: '状态',
+      type: 'select',
+      placeholder: '下拉选择',
+      width: 130,
+      options: [
+        { label: '全部', value: '' },
+        { label: '有效', value: 'Y' },
+        { label: '无效', value: 'N' },
+      ],
+    },
+    {
+      field: 'dateRange',
+      label: '更新日期',
+      type: 'custom',
+      render: (v, onChange) => (
+        <RangePicker
+          format="YYYY-MM-DD"
+          value={v as [Dayjs, Dayjs] | undefined}
+          onChange={(next) => onChange(next)}
+        />
+      ),
+    },
+    {
+      field: 'topicValues',
+      label: '主题',
+      type: 'custom',
+      render: (v, onChange) => (
+        <TreeSelect
+          style={{ width: 250 }}
+          placeholder="请选择主题"
+          treeData={treeData}
+          value={v as string[]}
+          onChange={(next) => onChange(next)}
+          treeCheckable
+          allowClear
+          showCheckedStrategy={TreeSelect.SHOW_CHILD}
+          treeCheckStrictly
+          treeDefaultExpandAll
+        />
+      ),
+    },
+  ];
 
-  const doQuery = () => {
-    setPageIndex(1);
-    void fetchList(1, pageSize, search);
-  };
+  const doQuery = () => void refresh(buildParams(search));
 
   const doReset = () => {
     setSearch(EMPTY_SEARCH);
-    setTopicValues([]);
-    setPageIndex(1);
-    void fetchList(1, pageSize, EMPTY_SEARCH);
+    void refresh(buildParams(EMPTY_SEARCH));
   };
 
   /** 启用/停用：成功后只改本地行数据，不整表重刷（与源工程一致，避免翻页位置跳动） */
@@ -138,7 +171,7 @@ export default function RuleList() {
     try {
       await deleteRule(row.id);
       message.success('删除成功');
-      void fetchList(pageIndex, pageSize, search);
+      void reload();
     } catch (e) {
       message.error((e as Error)?.message || '删除失败');
     }
@@ -224,70 +257,14 @@ export default function RuleList() {
       </div>
 
       <Card styles={{ body: { padding: 16 } }} style={{ marginBottom: 16 }}>
-        <Form layout="inline" style={{ rowGap: 12 }}>
-          <Form.Item label="检查项检索">
-            <Input
-              allowClear
-              placeholder="请输入规则名称/描述检索关键词"
-              style={{ width: 240 }}
-              value={search.ruleName}
-              onChange={(e) => setSearch((p) => ({ ...p, ruleName: e.target.value }))}
-              onPressEnter={doQuery}
-            />
-          </Form.Item>
-          <Form.Item label="规则编号">
-            <Input
-              allowClear
-              placeholder="请输入规则Code"
-              style={{ width: 180 }}
-              value={search.ruleCode}
-              onChange={(e) => setSearch((p) => ({ ...p, ruleCode: e.target.value }))}
-              onPressEnter={doQuery}
-            />
-          </Form.Item>
-          <Form.Item label="状态">
-            <Select
-              style={{ width: 130 }}
-              placeholder="下拉选择"
-              value={search.ruleStatus}
-              onChange={(v) => setSearch((p) => ({ ...p, ruleStatus: v }))}
-              options={[
-                { label: '全部', value: '' },
-                { label: '有效', value: 'Y' },
-                { label: '无效', value: 'N' },
-              ]}
-            />
-          </Form.Item>
-          <Form.Item label="更新日期">
-            <RangePicker
-              format="YYYY-MM-DD"
-              value={search.dateRange}
-              onChange={(v) => setSearch((p) => ({ ...p, dateRange: (v as [Dayjs, Dayjs]) ?? null }))}
-            />
-          </Form.Item>
-          <Form.Item label="主题">
-            <TreeSelect
-              style={{ width: 250 }}
-              placeholder="请选择主题"
-              treeData={treeData}
-              value={topicValues}
-              onChange={onTopicChange}
-              treeCheckable
-              allowClear
-              showCheckedStrategy={TreeSelect.SHOW_CHILD}
-              treeCheckStrictly
-              treeDefaultExpandAll
-            />
-          </Form.Item>
-          <Form.Item>
-            <Space>
-              <Button type="primary" onClick={doQuery}>
-                查询
-              </Button>
-              <Button onClick={doReset}>重置</Button>
-            </Space>
-          </Form.Item>
-        </Form>
+        <FilterForm<SearchState>
+          fields={filterFields}
+          value={search}
+          onChange={setSearch}
+          onQuery={doQuery}
+          onReset={doReset}
+          loading={loading}
+        />
       </Card>
 
       <Card styles={{ body: { padding: 16 } }}>
@@ -298,18 +275,7 @@ export default function RuleList() {
           columns={columns}
           dataSource={rows}
           scroll={{ x: 1200 }}
-          pagination={{
-            current: pageIndex,
-            pageSize,
-            total,
-            showSizeChanger: true,
-            showQuickJumper: true,
-            showTotal: (t) => `共 ${t} 条`,
-            onChange: (page, size) => {
-              setPageIndex(page);
-              setPageSize(size);
-            },
-          }}
+          pagination={pagination}
         />
       </Card>
 
@@ -319,7 +285,7 @@ export default function RuleList() {
         onClose={() => setModalOpen(false)}
         onSuccess={() => {
           setModalOpen(false);
-          void fetchList(pageIndex, pageSize, search);
+          void reload();
         }}
       />
     </div>

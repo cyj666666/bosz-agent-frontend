@@ -29,6 +29,7 @@ import {
 import { agentSse } from '../../api/agentSse';
 import type { IndexTreeNode, RuleExecuteResult, RuleItem, RuleMetricItem, SupplementaryOption } from '../../types';
 import MarkdownText from '../../components/MarkdownText';
+import { useTypewriter } from '../../components/useTypewriter';
 
 /** 触发条件解析智能体在知识库侧的 moduleCode（源工程写死） */
 const AI_ANALYSIS_MODULE_CODE = 'IntelligentStrategyEngine';
@@ -124,6 +125,16 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
   const [aiSending, setAiSending] = useState(false);
   const [sText, setSText] = useState('');
   const [sSending, setSSending] = useState(false);
+
+  /**
+   * 打字机（源 `views/knowledge/components/printMixin.js`）
+   *
+   * `setAiText` / `setSText` 收的是 **SSE 累积的完整文本**（相当于源件的 `resContent`），
+   * 这里由 `useTypewriter` 负责逐字"追"出来给界面显示（相当于源件的 `finalText`）。
+   * 关闭时传 `enabled: false` 即退化为"收到即渲染"。
+   */
+  const aiDisplay = useTypewriter(aiText);
+  const sDisplay = useTypewriter(sText);
 
   const [indexTree, setIndexTree] = useState<IndexTreeNode[]>([]);
   const [indexKeyword, setIndexKeyword] = useState('');
@@ -805,7 +816,7 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
               <>
                 <div style={{ marginTop: 20, marginBottom: 8, color: '#595959' }}>AI分析</div>
                 <div style={{ border: '1px solid #f0f0f0', borderRadius: 4, padding: 8, maxHeight: 320, overflow: 'auto' }}>
-                  <MarkdownText content={aiText} placeholder={aiSending ? '生成中…' : '-'} />
+                  <MarkdownText content={aiDisplay.text} placeholder={aiSending ? '生成中…' : '-'} />
                 </div>
               </>
             )}
@@ -814,7 +825,7 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
               <>
                 <div style={{ marginTop: 20, marginBottom: 8, color: '#595959' }}>补充分析</div>
                 <div style={{ border: '1px solid #f0f0f0', borderRadius: 4, padding: 8, maxHeight: 320, overflow: 'auto' }}>
-                  <MarkdownText content={sText} placeholder={sSending ? '生成中…' : '-'} />
+                  <MarkdownText content={sDisplay.text} placeholder={sSending ? '生成中…' : '-'} />
                 </div>
               </>
             )}

@@ -62,8 +62,10 @@
  *   （源 `getFormInfo()` 里它们是顶层 `inputCondition` / `configInfo.userPrompt`）。
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Button, Card, Input, InputNumber, Modal, Radio, Select, Space, Spin, Switch, Tabs, Tooltip, message } from 'antd';
+import { Alert, Button, Card, Col, Input, InputNumber, Modal, Radio, Row, Select, Space, Spin, Switch, Tabs, Tooltip, message } from 'antd';
 import type { InputRef } from 'antd';
+import { agentSse } from '../../api/agentSse';
+import type { AgentSseHandle } from '../../api/agentSse';
 import { IndexTreePicker } from '../../components/IndexTreePicker';
 import type { IndexTreePickerNode } from '../../components/IndexTreePicker';
 import { RuleTreePicker } from '../../components/RuleTreePicker';
@@ -82,6 +84,7 @@ import { TraceConfigModal } from './TraceConfigModal';
 import { ConfigParamsModal } from './ConfigParamsModal';
 import { IndexParamConfigModal } from './IndexParamConfigModal';
 import { BlackBoxConfigModal } from './BlackBoxConfigModal';
+import { useTypewriter } from '../../components/useTypewriter';
 import { HistoryVersionModal, PublishVersionModal } from './VersionModals';
 import { getLargeModelOptions, previewKnowledge, queryGroupTree, queryInfo, queryVersionById, updateKnowledge } from '../../api/knowledgeConfig';
 import type { KnowledgeGroupNode, SelectOption } from '../../api/knowledgeConfig';
@@ -247,8 +250,28 @@ export function KnowledgeConfigEditor({
   const [publishOpen, setPublishOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
+  /** 「生成文案」—— 一次性接口返回的提示词全文，可编辑后再预览（源 `previewContext`） */
+  const [previewPrompt, setPreviewPrompt] = useState('');
+  const [previewPromptLoading, setPreviewPromptLoading] = useState(false);
+  /** 「预览结果」—— POST-SSE 流式累积的全文（源 `contentProps.resContent`） */
   const [previewText, setPreviewText] = useState('');
   const [previewing, setPreviewing] = useState(false);
+  const previewSseRef = useRef<AgentSseHandle | null>(null);
+  /**
+   * 预览流序号 —— 用来丢弃「上一条流」的回调
+   *
+   * ⚠️ 必须有：`abort()` 会让上一条流的 `onDone` 在**微任务**里才触发，
+   * 若直接改新流的 `previewing=true`，会被旧回调立刻清成 `false`（按钮状态瞬闪、误判结束）。
+   * 每次开新流/主动终止都自增序号，回调只认自己那一号。
+   */
+  const previewSeqRef = useRef(0);
+  /**
+   * 打字机（源 `views/knowledge/components/PreviewModal.vue` 用了 `printMixin`）
+   *
+   * 预览结果本身是 SSE 流式（见 `startPreviewStream`），打字机负责把**积压**的增量
+   * 平滑地"追"出来显示（源 `printMixin` 对 `PostText` 同样套了这一层）。
+   */
+  const previewDisplay = useTypewriter(previewText);
 
   /** 铺数据（源 setConfigValue） */
   const setConfigValue = useCallback((data: ConfigInfo) => {
@@ -288,9 +311,20 @@ export function KnowledgeConfigEditor({
       .catch(() => setGroupOptions([]));
     // 每次打开都重置交互态
     setPreviewText('');
+    setPreviewPrompt('');
     setLeftTab('index');
     setTreeVisible(true);
   }, [open, getInfo]);
+
+  /** 卸载 / 关闭编辑器时中止预览流，避免流还在推、组件已走 */
+  useEffect(
+    () => () => {
+      previewSeqRef.current += 1;
+      previewSseRef.current?.abort();
+      previewSseRef.current = null;
+    },
+    [],
+  );
 
   /* ---- 两个 map 的读写（源 `changeCondition()` / `changeCodeParam()` / `setCodeParam()` / `largeModelCodeChange()`）---- */
 
@@ -436,15 +470,94 @@ export function KnowledgeConfigEditor({
   };
 
   /* ---- 预览 ---- */
+
+  /** 中止流（终止按钮 / 关闭弹窗 / 新一次预览都走这里） */
+  const stopPreviewStream = () => {
+    // 先作废序号：abort 触发的 onDone 随后到达时会被判为过期，不会再来改状态
+    previewSeqRef.current += 1;
+    previewSseRef.current?.abort();
+    previewSseRef.current = null;
+    setPreviewing(false);
+  };
+
+  /**
+   * 「预览结果」：POST-SSE 流式生成
+   *
+   * 后端 `KnowledgeBaseConfigController#getSummaryAnswer`（POST，`SseEmitter`，
+   * 与源工程 `PreviewModal` 的 `previewUrl = '/KnowledgeBase/config/getSummaryAnswer'` 一致）。
+   *
+   * ⚠️ 三个易踩点：
+   *   1. **不能走 axios**：普通请求会把整段响应一次读完，拿不到增量；
+   *      这里用 `agentSse`（fetch + ReadableStream）。也不走 `agentGet/agentPost` 的
+   *      `Result` 包装 —— SSE 帧体是 `{"answer":...}`，没有 `code/message` 外壳。
+   *   2. `inputParam` 传**数组**而不是 JSON 串：后端 `KnowledgeBasePromptViewReq.inputParam`
+   *      是 `List<JSONObject>`，`sendAnswer` 按 `name` / `defaultValue` 两个键取用。
+   *   3. 传 `previewPrompt` 会触发后端走「使用页面数据」分支（用当前编辑器里的配置而非库里的），
+   *      这正是预览该有的语义；不传则后端自己去库里拼提示词。
+   */
+  const startPreviewStream = useCallback(
+    (promptOverride?: string) => {
+      const largeModelCode = String(configInfo.largeModelCode ?? '');
+      if (!largeModelCode) {
+        message.error('请先选择大模型');
+        return;
+      }
+      // 先作废旧序号（并让旧流失效），再开新流 —— 顺序不能反，理由见 previewSeqRef 注释
+      previewSeqRef.current += 1;
+      const seq = previewSeqRef.current;
+      const isStale = () => seq !== previewSeqRef.current;
+      previewSseRef.current?.abort();
+      setPreviewText('');
+      setPreviewing(true);
+      previewSseRef.current = agentSse({
+        url: '/agent/KnowledgeBase/config/getSummaryAnswer',
+        body: {
+          ...configInfo,
+          paramId: knownId,
+          largeModelCode,
+          previewPrompt: promptOverride ?? previewPrompt,
+          inputParam,
+        },
+        onChunk: (chunk) => {
+          if (isStale()) return;
+          setPreviewText((prev) => prev + chunk.text);
+        },
+        onDone: () => {
+          if (isStale()) return;
+          previewSseRef.current = null;
+          setPreviewing(false);
+        },
+        onError: (err) => {
+          if (isStale()) return;
+          previewSseRef.current = null;
+          setPreviewing(false);
+          message.error(err instanceof Error ? err.message : '预览失败');
+        },
+      });
+    },
+    [configInfo, knownId, previewPrompt, inputParam],
+  );
+
+  /**
+   * 点「预览」：先保存 → 打开弹窗 → ①取「生成文案」→ ②自动开流
+   *
+   * 对应源工程 `PreviewModal` 的 `onMounted(){ getModelOptions(); generateText() }`
+   * 加用户点「预览」触发 `previewHandle → getContent()` 两步；这里把第二步合并成自动执行，
+   * 避免用户打开弹窗后还要再点一次（左侧仍有「预览」按钮可改完文案后重跑）。
+   */
   const handlePreview = () => {
     void doSave(() => {
       setPreviewOpen(true);
-      setPreviewing(true);
       setPreviewText('');
+      setPreviewPrompt('');
+      setPreviewPromptLoading(true);
       previewKnowledge({
         paramId: knownId,
         largeModelCode: configInfo.largeModelCode,
-        inputParam: JSON.stringify(inputParam),
+        // ⚠️ 传**数组**，不是 JSON 串：后端 `KnowledgeBasePromptViewReq.inputParam` 是
+        //    `List<JSONObject>`，传字符串会被 Jackson 拒掉（400 Cannot deserialize ... from String）。
+        //    同一个字段在 `KnowledgeBaseParamsInfoSaveReq` / `KnowledgeBaseParamsDTO` 里也是 JSONArray。
+        inputParam,
       })
         .then((res) => {
           const text =
@@ -453,13 +566,36 @@ export function KnowledgeConfigEditor({
               : ((res as { content?: string; answer?: string })?.content ??
                 (res as { answer?: string })?.answer ??
                 JSON.stringify(res));
-          setPreviewText(String(text ?? ''));
+          const promptText = String(text ?? '');
+          setPreviewPrompt(promptText);
+          setPreviewPromptLoading(false);
+          startPreviewStream(promptText);
         })
         .catch((err: unknown) => {
+          setPreviewPromptLoading(false);
           message.error(err instanceof Error ? err.message : '预览失败');
-        })
-        .finally(() => setPreviewing(false));
+        });
     });
+  };
+
+  /** 关闭预览弹窗：必须中止流，否则后台仍在推、组件卸载后 setState 会告警 */
+  const closePreview = () => {
+    stopPreviewStream();
+    setPreviewOpen(false);
+  };
+
+  const copyPreview = async () => {
+    const text = previewDisplay.text;
+    if (!text) {
+      message.warning('无可复制内容');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      message.success('复制成功');
+    } catch {
+      message.error('复制失败');
+    }
   };
 
   /**
@@ -758,14 +894,59 @@ export function KnowledgeConfigEditor({
       <Modal
         open={previewOpen}
         title="预览"
-        width={900}
+        width={1280}
         footer={null}
-        onCancel={() => setPreviewOpen(false)}
+        onCancel={closePreview}
         destroyOnClose
       >
-        <Spin spinning={previewing}>
-          <div style={{ minHeight: 240, whiteSpace: 'pre-wrap', lineHeight: 1.7 }}>{previewText}</div>
-        </Spin>
+        <Row gutter={16}>
+          {/* 左：生成文案（源 PreviewModal 的 content-container） */}
+          <Col span={12}>
+            <div style={{ fontWeight: 600, marginBottom: 8 }}>生成文案</div>
+            <Spin spinning={previewPromptLoading}>
+              <Input.TextArea
+                rows={20}
+                value={previewPrompt}
+                onChange={(e) => setPreviewPrompt(e.target.value)}
+                placeholder="生成中的提示词文案，可编辑后重新预览"
+              />
+            </Spin>
+            <Button
+              type="primary"
+              style={{ marginTop: 8 }}
+              onClick={() => startPreviewStream()}
+              disabled={previewing}
+            >
+              预览
+            </Button>
+          </Col>
+          {/* 右：预览结果（流式） */}
+          <Col span={12}>
+            <div style={{ fontWeight: 600, marginBottom: 8 }}>预览结果</div>
+            <div
+              style={{
+                height: 470,
+                overflow: 'auto',
+                border: '1px solid #d9d9d9',
+                borderRadius: 4,
+                padding: 8,
+              }}
+            >
+              {previewing && !previewText && (
+                <Alert type="info" message="正在生成…" showIcon style={{ marginBottom: 8 }} />
+              )}
+              <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.7 }}>{previewDisplay.text}</div>
+            </div>
+            <Space style={{ marginTop: 8 }}>
+              <Button danger onClick={stopPreviewStream} disabled={!previewing}>
+                终止
+              </Button>
+              <Button onClick={() => void copyPreview()} disabled={!previewDisplay.text}>
+                复制
+              </Button>
+            </Space>
+          </Col>
+        </Row>
       </Modal>
     </>
   );

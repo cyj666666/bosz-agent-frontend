@@ -47,6 +47,8 @@ import {
   type IndexGroupNode,
   type IndexParamRow,
 } from '../../api/indexConfig';
+import { FilterForm } from '../../components/FilterForm';
+import { useAgentTable } from '../../components/useAgentTable';
 import { IndexRelateInfoModal } from './IndexRelateInfoModal';
 import IndexEditorModal from './IndexEditorModal';
 
@@ -81,11 +83,12 @@ export default function IndexConfigList() {
   const [selectedKeys, setSelectedKeys] = useState<Key[]>([]);
 
   /* ---------------- 指标列表 ---------------- */
-  const [rows, setRows] = useState<IndexParamRow[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [pageIndex, setPageIndex] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  /* 分页 / 加载态 / 请求参数 / 过期响应丢弃统一由 hook 负责（见 components/useAgentTable.ts） */
+  const { rows, loading, pagination, refresh, reload } = useAgentTable<IndexParamRow>(queryAllList, {
+    // 首屏由下面「分组变化」的 effect 触发，避免挂载时连查两次
+    immediate: false,
+    errorText: '指标列表加载失败',
+  });
   const [filter, setFilter] = useState<FilterState>(EMPTY_FILTER);
   const [rowKeys, setRowKeys] = useState<Key[]>([]);
 
@@ -161,40 +164,25 @@ export default function IndexConfigList() {
   }, []);
 
   /**
-   * 拉指标列表
+   * 查询条件 → 请求参数
    *
-   * 入参照抄源工程 `queryHandle`：选中分组时带 `parentParamNo/groupValue/groupName`，
+   * 照抄源工程 `queryHandle`：选中分组时带 `parentParamNo/groupValue/groupName`，
    * 未选中时不带（即查全部）。`filters: []` 是源工程固定传的空数组。
+   * 各筛选项只带非空值。
    */
-  const loadList = useCallback(
-    async (page: number, size: number, group: IndexGroupNode | null, cond: FilterState) => {
-      setLoading(true);
-      try {
-        const params: Record<string, unknown> = {
-          filters: [],
-          pageIndex: page,
-          pageSize: size,
-        };
-        if (group) {
-          params.parentParamNo = group.groupId;
-          params.groupValue = group.groupValue;
-          params.groupName = group.groupName;
-        }
-        if (cond.paramNo) params.paramNo = cond.paramNo;
-        if (cond.paramId) params.paramID = cond.paramId;
-        if (cond.paramName) params.paramName = cond.paramName;
-        if (cond.indexSource) params.indexSource = cond.indexSource;
-
-        const res = await queryAllList(params);
-        setRows(res?.list ?? []);
-        setTotal(res?.totalCount ?? 0);
-      } catch (e) {
-        message.error((e as Error)?.message || '指标列表加载失败');
-        setRows([]);
-        setTotal(0);
-      } finally {
-        setLoading(false);
+  const buildParams = useCallback(
+    (group: IndexGroupNode | null, cond: FilterState): Record<string, unknown> => {
+      const params: Record<string, unknown> = { filters: [] };
+      if (group) {
+        params.parentParamNo = group.groupId;
+        params.groupValue = group.groupValue;
+        params.groupName = group.groupName;
       }
+      if (cond.paramNo) params.paramNo = cond.paramNo;
+      if (cond.paramId) params.paramID = cond.paramId;
+      if (cond.paramName) params.paramName = cond.paramName;
+      if (cond.indexSource) params.indexSource = cond.indexSource;
+      return params;
     },
     [],
   );
@@ -203,10 +191,11 @@ export default function IndexConfigList() {
     void loadTree();
   }, [loadTree]);
 
+  // 首屏 + 切换分组都走这里（hook 的 immediate 已关掉，保证只查一次）
   useEffect(() => {
-    void loadList(pageIndex, pageSize, selectedGroup, filter);
+    void refresh(buildParams(selectedGroup, filter));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pageIndex, pageSize, selectedGroup]);
+  }, [selectedGroup]);
 
   /**
    * 从「关联信息」弹窗跳转过来时自动定位分组（?groupId=xxx）
@@ -223,7 +212,7 @@ export default function IndexConfigList() {
     setSelectedKeys([groupId]);
     setSelectedGroup(node);
     setRowKeys([]);
-    setPageIndex(1);
+    // 不再手动 setPageIndex(1)：hook 的 refresh() 一律回到第 1 页
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, tree]);
 
@@ -235,14 +224,12 @@ export default function IndexConfigList() {
       setSelectedKeys([]);
       setSelectedGroup(null);
       setRowKeys([]);
-      setPageIndex(1);
       return;
     }
     const node = findGroup(tree, String(keys[0]));
     setSelectedKeys(keys);
     setSelectedGroup(node);
     setRowKeys([]);
-    setPageIndex(1);
   };
 
   const openGroupModal = (mode: 'add' | 'addChild' | 'edit') => {
@@ -309,15 +296,11 @@ export default function IndexConfigList() {
 
   /* ---------------- 列表操作 ---------------- */
 
-  const doQuery = () => {
-    setPageIndex(1);
-    void loadList(1, pageSize, selectedGroup, filter);
-  };
+  const doQuery = () => void refresh(buildParams(selectedGroup, filter));
 
   const doReset = () => {
     setFilter(EMPTY_FILTER);
-    setPageIndex(1);
-    void loadList(1, pageSize, selectedGroup, EMPTY_FILTER);
+    void refresh(buildParams(selectedGroup, EMPTY_FILTER));
   };
 
   const requireOne = (): string | null => {
@@ -335,7 +318,7 @@ export default function IndexConfigList() {
       await deleteIndex({ paramNo });
       message.success('删除成功');
       setRowKeys([]);
-      void loadList(pageIndex, pageSize, selectedGroup, filter);
+      void reload();
     } catch (e) {
       message.error((e as Error)?.message || '删除失败');
     }
@@ -362,7 +345,7 @@ export default function IndexConfigList() {
       message.success(targetModal.mode === 'copy' ? '复制成功' : '移动成功');
       setTargetModal((s) => ({ ...s, open: false }));
       setRowKeys([]);
-      void loadList(pageIndex, pageSize, selectedGroup, filter);
+      void reload();
     } catch (e) {
       message.error((e as Error)?.message || '操作失败');
     }
@@ -440,7 +423,7 @@ export default function IndexConfigList() {
       }
       message.success(`已引入 ${importKeys.length} 个指标`);
       setImportModal(false);
-      void loadList(pageIndex, pageSize, selectedGroup, filter);
+      void reload();
     } catch (e) {
       message.error((e as Error)?.message || '引入失败');
     } finally {
@@ -494,56 +477,19 @@ export default function IndexConfigList() {
         {/* 右：指标列表 */}
         <Col span={19}>
           <Card styles={{ body: { padding: 16 } }}>
-            <Form layout="inline" style={{ rowGap: 12, marginBottom: 12 }}>
-              <Form.Item label="指标ID">
-                <Input
-                  allowClear
-                  placeholder="请输入指标ID"
-                  style={{ width: 180 }}
-                  value={filter.paramNo}
-                  onChange={(e) => setFilter((p) => ({ ...p, paramNo: e.target.value }))}
-                  onPressEnter={doQuery}
-                />
-              </Form.Item>
-              <Form.Item label="指标编号">
-                <Input
-                  allowClear
-                  placeholder="请输入指标编号"
-                  style={{ width: 180 }}
-                  value={filter.paramId}
-                  onChange={(e) => setFilter((p) => ({ ...p, paramId: e.target.value }))}
-                  onPressEnter={doQuery}
-                />
-              </Form.Item>
-              <Form.Item label="指标名称">
-                <Input
-                  allowClear
-                  placeholder="请输入指标名称"
-                  style={{ width: 180 }}
-                  value={filter.paramName}
-                  onChange={(e) => setFilter((p) => ({ ...p, paramName: e.target.value }))}
-                  onPressEnter={doQuery}
-                />
-              </Form.Item>
-              <Form.Item label="数据来源">
-                <Input
-                  allowClear
-                  placeholder="请输入数据来源"
-                  style={{ width: 180 }}
-                  value={filter.indexSource}
-                  onChange={(e) => setFilter((p) => ({ ...p, indexSource: e.target.value }))}
-                  onPressEnter={doQuery}
-                />
-              </Form.Item>
-              <Form.Item>
-                <Space>
-                  <Button type="primary" onClick={doQuery}>
-                    查询
-                  </Button>
-                  <Button onClick={doReset}>重置</Button>
-                </Space>
-              </Form.Item>
-            </Form>
+            <FilterForm<FilterState>
+              fields={[
+                { field: 'paramNo', label: '指标ID', placeholder: '请输入指标ID', width: 180 },
+                { field: 'paramId', label: '指标编号', placeholder: '请输入指标编号', width: 180 },
+                { field: 'paramName', label: '指标名称', placeholder: '请输入指标名称', width: 180 },
+                { field: 'indexSource', label: '数据来源', placeholder: '请输入数据来源', width: 180 },
+              ]}
+              value={filter}
+              onChange={setFilter}
+              onQuery={doQuery}
+              onReset={doReset}
+              loading={loading}
+            />
 
             <Space size={8} wrap style={{ marginBottom: 12 }}>
               <Button
@@ -589,7 +535,7 @@ export default function IndexConfigList() {
               <Button type="primary" onClick={() => void doRefreshCache()}>
                 刷新缓存
               </Button>
-              <Button onClick={() => void loadList(pageIndex, pageSize, selectedGroup, filter)}>刷新</Button>
+              <Button onClick={() => void reload()}>刷新</Button>
             </Space>
 
             <Table<IndexParamRow>
@@ -603,18 +549,7 @@ export default function IndexConfigList() {
                 selectedRowKeys: rowKeys,
                 onChange: (keys) => setRowKeys(keys),
               }}
-              pagination={{
-                current: pageIndex,
-                pageSize,
-                total,
-                showSizeChanger: true,
-                showQuickJumper: true,
-                showTotal: (t) => `共 ${t} 条`,
-                onChange: (p, s) => {
-                  setPageIndex(p);
-                  setPageSize(s);
-                },
-              }}
+              pagination={pagination}
             />
           </Card>
         </Col>
@@ -720,7 +655,7 @@ export default function IndexConfigList() {
         onClose={() => setEditorOpen(false)}
         onSuccess={() => {
           setEditorOpen(false);
-          void loadList(pageIndex, pageSize, selectedGroup, filter);
+          void reload();
         }}
       />
     </div>

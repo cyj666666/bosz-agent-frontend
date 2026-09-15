@@ -6,7 +6,10 @@
  *
  * ── 契约（逐条对齐）──
  * 参数列表：`[{ name, defaultValue, id }]`（**就是 configInfo.inputParam 的结构**）
- * 默认项：`{ name: 'entName', defaultValue: '科大讯飞股份有限公司', id }`（源 `setDefaultParams` 补的）
+ * 默认项：`{ name: 'entName', defaultValue: '', id }` —— 源工程 `setDefaultParams` 会补一个 entName 参数项，
+ *   但其默认值是「科大讯飞股份有限公司」（厂商 demo 公司名，会随 `input_param` 落库）。
+ *   **本实现保留 `entName` 这个参数名（后端按 script 顶层键取参，名字是有意义的），
+ *   但把默认值改为空串**，由用户在测试集里显式填写。
  * 测试集列表：`getParam({ knowledgeId, pageIndex: 1, pageSize: 500 })`
  *   → 每项 `{ id, inputParamName, inputParam }`，其中 `inputParam` 是参数数组的 **JSON 串**
  * 选中测试集：`JSON.parse(item.inputParam)` 覆盖当前参数列表
@@ -69,10 +72,15 @@ export function TestSetPanel({ knownId, value, onChange }: TestSetPanelProps) {
     void loadTestList();
   }, [loadTestList]);
 
-  /** 保证参数列表里始终有 entName（源 `setDefaultParams` 的行为） */
+  /**
+   * 保证参数列表里始终有 entName（源 `setDefaultParams` 的行为）
+   *
+   * ⚠️ 只补**参数名**，不补默认值：源工程的默认值是厂商 demo 公司名
+   * 「科大讯飞股份有限公司」，而这份列表会随 `input_param` 落库 —— 故留空串。
+   */
   useEffect(() => {
     if (value.length === 0) {
-      onChange([{ name: 'entName', defaultValue: '科大讯飞股份有限公司', id: uid() }]);
+      onChange([{ name: 'entName', defaultValue: '', id: uid() }]);
     }
     // 只在初始为空时补默认项，之后不干预用户编辑
     // eslint-disable-next-line react-hooks/exhaustive-deps

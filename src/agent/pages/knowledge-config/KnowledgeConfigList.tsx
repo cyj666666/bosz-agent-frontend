@@ -23,7 +23,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Button, Card, Col, Form, Input, Modal, Popconfirm, Row, Select, Space, Table, Tooltip, Tree, message } from 'antd';
+import { Button, Card, Col, Form, Input, Modal, Popconfirm, Row, Space, Table, Tooltip, Tree, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { Key } from 'react';
 import {
@@ -41,6 +41,8 @@ import {
   type KnowledgeParamRow,
   type LargeModelRow,
 } from '../../api/knowledgeConfig';
+import { FilterForm } from '../../components/FilterForm';
+import { useAgentTable } from '../../components/useAgentTable';
 import KnowledgeEditorModal from './KnowledgeEditorModal';
 import { KnowledgeConfigEditor } from './KnowledgeConfigEditor';
 import { TargetConfigModal } from './TargetConfigModal';
@@ -65,12 +67,12 @@ export default function KnowledgeConfigList() {
   /** 读路由 query（用于从指标「关联信息」弹窗跳转过来时定位分组） */
   const [searchParams] = useSearchParams();
 
-  /* 列表 */
-  const [rows, setRows] = useState<KnowledgeParamRow[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [pageIndex, setPageIndex] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  /* 列表：分页 / 加载态 / 请求参数 / 过期响应丢弃统一由 hook 负责（见 components/useAgentTable.ts） */
+  const { rows, loading, pagination, refresh, reload } = useAgentTable<KnowledgeParamRow>(pageKnowledgeList, {
+    // 首屏由下面「分组变化」的 effect 触发，避免挂载时连查两次
+    immediate: false,
+    errorText: '知识库列表加载失败',
+  });
   const [filter, setFilter] = useState<FilterState>(EMPTY_FILTER);
   const [rowKeys, setRowKeys] = useState<Key[]>([]);
 
@@ -137,29 +139,21 @@ export default function KnowledgeConfigList() {
     }
   }, []);
 
-  const loadList = useCallback(
-    async (page: number, size: number, groupId: string, cond: FilterState) => {
-      setLoading(true);
-      try {
-        const params: Record<string, unknown> = { pageIndex: page, pageSize: size };
-        if (groupId) params.parentParamNo = groupId;
-        if (cond.paramNo) params.paramNo = cond.paramNo;
-        if (cond.paramName) params.paramName = cond.paramName;
-        if (cond.paramStatus) params.paramStatus = cond.paramStatus;
-        if (cond.online) params.online = cond.online;
-        const res = await pageKnowledgeList(params);
-        setRows(res?.list ?? []);
-        setTotal(res?.totalCount ?? 0);
-      } catch (e) {
-        message.error((e as Error)?.message || '知识库列表加载失败');
-        setRows([]);
-        setTotal(0);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [],
-  );
+  /**
+   * 查询条件 → 请求参数
+   *
+   * 照抄源 `queryHandle`：**只带非空项**（空值不传）。选中分组时带 `parentParamNo`，
+   * 未选中即查全部 —— 与源 `resetHandle` 里 `params.groupId = null` 的语义一致。
+   */
+  const buildParams = useCallback((groupId: string, cond: FilterState): Record<string, unknown> => {
+    const params: Record<string, unknown> = {};
+    if (groupId) params.parentParamNo = groupId;
+    if (cond.paramNo) params.paramNo = cond.paramNo;
+    if (cond.paramName) params.paramName = cond.paramName;
+    if (cond.paramStatus) params.paramStatus = cond.paramStatus;
+    if (cond.online) params.online = cond.online;
+    return params;
+  }, []);
 
   useEffect(() => {
     void loadTree();
@@ -168,10 +162,11 @@ export default function KnowledgeConfigList() {
       .catch(() => setLargeModels([]));
   }, [loadTree]);
 
+  // 首屏 + 切换分组都走这里（hook 的 immediate 已关掉，保证只查一次）
   useEffect(() => {
-    void loadList(pageIndex, pageSize, selectedGroupId, filter);
+    void refresh(buildParams(selectedGroupId, filter));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pageIndex, pageSize, selectedGroupId]);
+  }, [selectedGroupId]);
 
   /**
    * 从指标「关联信息」弹窗跳转过来时自动定位分组（?groupId=xxx）
@@ -188,7 +183,7 @@ export default function KnowledgeConfigList() {
     setSelectedGroupId(groupId);
     setSelectedGroup(node);
     setRowKeys([]);
-    setPageIndex(1);
+    // 不再手动 setPageIndex(1)：hook 的 refresh() 一律回到第 1 页
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, tree]);
 
@@ -199,14 +194,12 @@ export default function KnowledgeConfigList() {
       setSelectedGroupId('');
       setSelectedGroup(null);
       setRowKeys([]);
-      setPageIndex(1);
       return;
     }
     const id = String(keys[0]);
     setSelectedGroupId(id);
     setSelectedGroup(findGroup(tree, id));
     setRowKeys([]);
-    setPageIndex(1);
   };
 
   const openGroupModal = (mode: 'add' | 'addChild' | 'edit') => {
@@ -281,15 +274,11 @@ export default function KnowledgeConfigList() {
     return String(rowKeys[0]);
   };
 
-  const doQuery = () => {
-    setPageIndex(1);
-    void loadList(1, pageSize, selectedGroupId, filter);
-  };
+  const doQuery = () => void refresh(buildParams(selectedGroupId, filter));
 
   const doReset = () => {
     setFilter(EMPTY_FILTER);
-    setPageIndex(1);
-    void loadList(1, pageSize, selectedGroupId, EMPTY_FILTER);
+    void refresh(buildParams(selectedGroupId, EMPTY_FILTER));
   };
 
   const doDelete = async () => {
@@ -299,7 +288,7 @@ export default function KnowledgeConfigList() {
       await deleteKnowledge({ paramId, paramNo: paramId });
       message.success('删除成功');
       setRowKeys([]);
-      void loadList(pageIndex, pageSize, selectedGroupId, filter);
+      void reload();
     } catch (e) {
       message.error((e as Error)?.message || '删除失败');
     }
@@ -326,7 +315,7 @@ export default function KnowledgeConfigList() {
       message.success(targetModal.mode === 'copy' ? '复制成功' : '移动成功');
       setTargetModal((s) => ({ ...s, open: false }));
       setRowKeys([]);
-      void loadList(pageIndex, pageSize, selectedGroupId, filter);
+      void reload();
     } catch (e) {
       message.error((e as Error)?.message || '操作失败');
     }
@@ -458,62 +447,39 @@ export default function KnowledgeConfigList() {
 
         <Col span={19}>
           <Card styles={{ body: { padding: 16 } }}>
-            <Form layout="inline" style={{ rowGap: 12, marginBottom: 12 }}>
-              <Form.Item label="知识库编号">
-                <Input
-                  allowClear
-                  placeholder="请输入知识库编号"
-                  style={{ width: 180 }}
-                  value={filter.paramNo}
-                  onChange={(e) => setFilter((p) => ({ ...p, paramNo: e.target.value }))}
-                  onPressEnter={doQuery}
-                />
-              </Form.Item>
-              <Form.Item label="知识库名称">
-                <Input
-                  allowClear
-                  placeholder="请输入知识库名称"
-                  style={{ width: 180 }}
-                  value={filter.paramName}
-                  onChange={(e) => setFilter((p) => ({ ...p, paramName: e.target.value }))}
-                  onPressEnter={doQuery}
-                />
-              </Form.Item>
-              <Form.Item label="验收状态">
-                <Select
-                  allowClear
-                  placeholder="请选择验收状态"
-                  style={{ width: 140 }}
-                  value={filter.paramStatus || undefined}
-                  onChange={(v) => setFilter((p) => ({ ...p, paramStatus: v ?? '' }))}
-                  options={[
+            <FilterForm<FilterState>
+              fields={[
+                { field: 'paramNo', label: '知识库编号', placeholder: '请输入知识库编号', width: 180 },
+                { field: 'paramName', label: '知识库名称', placeholder: '请输入知识库名称', width: 180 },
+                {
+                  field: 'paramStatus',
+                  label: '验收状态',
+                  type: 'select',
+                  placeholder: '请选择验收状态',
+                  width: 140,
+                  options: [
                     { label: '是', value: 'Y' },
                     { label: '否', value: 'N' },
-                  ]}
-                />
-              </Form.Item>
-              <Form.Item label="上线状态">
-                <Select
-                  allowClear
-                  placeholder="请选择上线状态"
-                  style={{ width: 140 }}
-                  value={filter.online || undefined}
-                  onChange={(v) => setFilter((p) => ({ ...p, online: v ?? '' }))}
-                  options={[
+                  ],
+                },
+                {
+                  field: 'online',
+                  label: '上线状态',
+                  type: 'select',
+                  placeholder: '请选择上线状态',
+                  width: 140,
+                  options: [
                     { label: '已上线', value: 'Y' },
                     { label: '已下线', value: 'N' },
-                  ]}
-                />
-              </Form.Item>
-              <Form.Item>
-                <Space>
-                  <Button type="primary" onClick={doQuery}>
-                    查询
-                  </Button>
-                  <Button onClick={doReset}>重置</Button>
-                </Space>
-              </Form.Item>
-            </Form>
+                  ],
+                },
+              ]}
+              value={filter}
+              onChange={setFilter}
+              onQuery={doQuery}
+              onReset={doReset}
+              loading={loading}
+            />
 
             <Space size={8} wrap style={{ marginBottom: 12 }}>
               <Button
@@ -569,7 +535,7 @@ export default function KnowledgeConfigList() {
                   知识库配置
                 </Button>
               </Tooltip>
-              <Button onClick={() => void loadList(pageIndex, pageSize, selectedGroupId, filter)}>刷新</Button>
+              <Button onClick={() => void reload()}>刷新</Button>
             </Space>
 
             <Table<KnowledgeParamRow>
@@ -580,18 +546,7 @@ export default function KnowledgeConfigList() {
               dataSource={rows}
               scroll={{ x: 1650 }}
               rowSelection={{ selectedRowKeys: rowKeys, onChange: (keys) => setRowKeys(keys) }}
-              pagination={{
-                current: pageIndex,
-                pageSize,
-                total,
-                showSizeChanger: true,
-                showQuickJumper: true,
-                showTotal: (t) => `共 ${t} 条`,
-                onChange: (p, s) => {
-                  setPageIndex(p);
-                  setPageSize(s);
-                },
-              }}
+              pagination={pagination}
             />
           </Card>
         </Col>
@@ -666,7 +621,7 @@ export default function KnowledgeConfigList() {
         onClose={() => setEditorOpen(false)}
         onSuccess={() => {
           setEditorOpen(false);
-          void loadList(pageIndex, pageSize, selectedGroupId, filter);
+          void reload();
         }}
       />
 
@@ -678,7 +633,7 @@ export default function KnowledgeConfigList() {
           knownName={configEditorTarget.name}
           knownCode={configEditorTarget.code}
           onClose={() => setConfigEditorTarget(null)}
-          onSaved={() => void loadList(pageIndex, pageSize, selectedGroupId, filter)}
+          onSaved={() => void reload()}
         />
       )}
 
@@ -688,7 +643,7 @@ export default function KnowledgeConfigList() {
           open
           knownId={targetConfigId}
           onClose={() => setTargetConfigId(null)}
-          onSuccess={() => void loadList(pageIndex, pageSize, selectedGroupId, filter)}
+          onSuccess={() => void reload()}
         />
       )}
 
@@ -700,7 +655,7 @@ export default function KnowledgeConfigList() {
           blackModelCode={blackBoxTarget.modelCode}
           blackContentDesc={blackBoxTarget.contentDesc}
           onClose={() => setBlackBoxTarget(null)}
-          onSaved={() => void loadList(pageIndex, pageSize, selectedGroupId, filter)}
+          onSaved={() => void reload()}
         />
       )}
     </div>
