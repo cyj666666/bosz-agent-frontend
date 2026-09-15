@@ -85,6 +85,7 @@ import { ConfigParamsModal } from './ConfigParamsModal';
 import { IndexParamConfigModal } from './IndexParamConfigModal';
 import { BlackBoxConfigModal } from './BlackBoxConfigModal';
 import { useTypewriter } from '../../components/useTypewriter';
+import { ThinkText } from '../../components/ThinkText';
 import { HistoryVersionModal, PublishVersionModal } from './VersionModals';
 import { getLargeModelOptions, previewKnowledge, queryGroupTree, queryInfo, queryVersionById, updateKnowledge } from '../../api/knowledgeConfig';
 import type { KnowledgeGroupNode, SelectOption } from '../../api/knowledgeConfig';
@@ -265,6 +266,23 @@ export function KnowledgeConfigEditor({
    * 每次开新流/主动终止都自增序号，回调只认自己那一号。
    */
   const previewSeqRef = useRef(0);
+
+  /* ---- 「结果校验」（源 PreviewModal 内嵌的第二个 a-modal「校验结果」） ----
+   * 源端结构：预览结果区右侧「结果校验」按钮（流结束后才可点）→ 弹出「校验结果」子弹窗
+   *          → 选大模型 → 「校验」按钮走 `getResultCheck` SSE → 「终止」可中断。
+   * 后端 `KnowledgeBaseConfigController#getResultCheck` 与 `sendResultCheck` 本工程已完整实现，
+   * 此前只是前端没接线（`api` 里定义了 `getResultCheck` 相关能力但无人调用）。 */
+  /** 子弹窗开关（源 `checkVisible`） */
+  const [checkOpen, setCheckOpen] = useState(false);
+  /** 校验所用大模型（源 `checkLargeModelCode`；源 `PreviewContent` 会默认跟当前模型，此处同） */
+  const [checkModelCode, setCheckModelCode] = useState('');
+  /** 「校验结果」—— POST-SSE 流式累积全文（源 `contentProps2.finalText`） */
+  const [checkText, setCheckText] = useState('');
+  const [checking, setChecking] = useState(false);
+  const checkSseRef = useRef<AgentSseHandle | null>(null);
+  /** 与 `previewSeqRef` 同理：丢弃「上一条校验流」的迟到回调 */
+  const checkSeqRef = useRef(0);
+
   /**
    * 打字机（源 `views/knowledge/components/PreviewModal.vue` 用了 `printMixin`）
    *
@@ -312,16 +330,21 @@ export function KnowledgeConfigEditor({
     // 每次打开都重置交互态
     setPreviewText('');
     setPreviewPrompt('');
+    setCheckText('');
+    setCheckOpen(false);
     setLeftTab('index');
     setTreeVisible(true);
   }, [open, getInfo]);
 
-  /** 卸载 / 关闭编辑器时中止预览流，避免流还在推、组件已走 */
+  /** 卸载 / 关闭编辑器时中止「预览流」与「校验流」，避免流还在推、组件已走 */
   useEffect(
     () => () => {
       previewSeqRef.current += 1;
       previewSseRef.current?.abort();
       previewSseRef.current = null;
+      checkSeqRef.current += 1;
+      checkSseRef.current?.abort();
+      checkSseRef.current = null;
     },
     [],
   );
@@ -512,11 +535,14 @@ export function KnowledgeConfigEditor({
       previewSseRef.current = agentSse({
         url: '/agent/KnowledgeBase/config/getSummaryAnswer',
         body: {
-          ...configInfo,
+          // ⚠️ 与 `/preview` 同理：必须用 `buildPayload()`（当前编辑器的最新值），
+          //    不能裸用 `configInfo`（那是 queryInfo 回来的旧值）。后端 `sendAnswer` 在
+          //    `previewPrompt` 非空时走"使用页面数据"分支，会用请求里的 prompt / contentDesc /
+          //    inputCondition / userPrompt / largeModelParam / isTop 覆盖库里的行 —— 传旧的等于白传。
+          ...buildPayload(),
           paramId: knownId,
           largeModelCode,
           previewPrompt: promptOverride ?? previewPrompt,
-          inputParam,
         },
         onChunk: (chunk) => {
           if (isStale()) return;
@@ -535,53 +561,62 @@ export function KnowledgeConfigEditor({
         },
       });
     },
-    [configInfo, knownId, previewPrompt, inputParam],
+    [configInfo, knownId, previewPrompt, buildPayload],
   );
 
   /**
-   * 点「预览」：先保存 → 打开弹窗 → ①取「生成文案」→ ②自动开流
+   * 点「预览」：**直接用页面当前配置**取「生成文案」，**不落库**
    *
-   * 对应源工程 `PreviewModal` 的 `onMounted(){ getModelOptions(); generateText() }`
-   * 加用户点「预览」触发 `previewHandle → getContent()` 两步；这里把第二步合并成自动执行，
-   * 避免用户打开弹窗后还要再点一次（左侧仍有「预览」按钮可改完文案后重跑）。
+   * ⚠️ 2026-09-15 按源工程 `PreviewModal.onMounted()` 修正两点（此前两处都错了）：
+   *
+   *  1. **不先保存**。源工程预览是"拿页面数据预览"，打开弹窗只打**两个**接口：
+   *     `/largeModelConfig/list` + `/KnowledgeBase/config/preview`。
+   *     此前这里先 `doSave()` → 凭空多打 `/KnowledgeBase/config/update` 与
+   *     `/KnowledgeBase/config/pageList`（保存后父级刷新列表），且语义不对（预览不该落库）。
+   *
+   *  2. **必须把当前编辑器的全量配置带过去**（等价于源工程的 `...props.configInfo`）。
+   *     ⚠️ 注意本工程的 `configInfo` 是 `queryInfo` 回来的**旧值**，最新编辑内容在
+   *     `promptGroups / outputGroups / elseCondition / splitStrategy / largeModelParam` 里，
+   *     所以这里用 **`buildPayload()`**（与保存同源的组装函数），而不是裸 `configInfo`。
+   *     后端 `knowledgeBasePromptPreview` 会置 `previewFlag=true`，随后 `handlePromptContent`
+   *     用**请求里的字段覆盖库里的那一行**：
+   *     ```
+   *     setPrompt(params.prompt)          setContentDesc(params.contentDesc)
+   *     setInputCondition(params.inputCondition)  setUserPrompt(params.userPrompt)
+   *     setLargeModelParam(...)           setIsTop(...)          setSplitStrategyParam(...)
+   *     ```
+   *     **少传哪个，哪一项就被置成 null** → 文案渲染为空。
+   *     此前只传了 `paramId / largeModelCode / inputParam` 三个字段，所以 `/preview` 只回了
+   *     一行「数据详情追踪ID:[...]」，正文全丢；`previewPrompt` 为空又导致随后的 SSE 也拿不到内容。
+   *     源工程原文就是 `knowledgeBasePreview({ paramId: props.knownId, ...props.configInfo })`。
+   *
+   *  3. **不再自动开流**。源工程是"打开弹窗先出「生成文案」→ 用户点『预览』按钮才流式生成"，
+   *     所以它打开弹窗只看得到 2 个接口。此处改为同源行为（右侧「预览」按钮触发 SSE）。
    */
   const handlePreview = () => {
-    void doSave(() => {
-      setPreviewOpen(true);
-      setPreviewText('');
-      setPreviewPrompt('');
-      setPreviewPromptLoading(true);
-      previewKnowledge({
-        paramId: knownId,
-        largeModelCode: configInfo.largeModelCode,
-        // ⚠️ 传**数组**，不是 JSON 串：后端 `KnowledgeBasePromptViewReq.inputParam` 是
-        //    `List<JSONObject>`，传字符串会被 Jackson 拒掉（400 Cannot deserialize ... from String）。
-        //    同一个字段在 `KnowledgeBaseParamsInfoSaveReq` / `KnowledgeBaseParamsDTO` 里也是 JSONArray。
-        inputParam,
+    setPreviewOpen(true);
+    setPreviewText('');
+    setPreviewPrompt('');
+    setPreviewPromptLoading(true);
+    previewKnowledge({
+      ...buildPayload(),
+      paramId: knownId,
+      largeModelCode: configInfo.largeModelCode,
+    })
+      .then((res) => {
+        const text =
+          typeof res === 'string'
+            ? res
+            : ((res as { content?: string; answer?: string })?.content ??
+              (res as { answer?: string })?.answer ??
+              JSON.stringify(res));
+        setPreviewPrompt(String(text ?? ''));
+        setPreviewPromptLoading(false);
       })
-        .then((res) => {
-          const text =
-            typeof res === 'string'
-              ? res
-              : ((res as { content?: string; answer?: string })?.content ??
-                (res as { answer?: string })?.answer ??
-                JSON.stringify(res));
-          const promptText = String(text ?? '');
-          setPreviewPrompt(promptText);
-          setPreviewPromptLoading(false);
-          startPreviewStream(promptText);
-        })
-        .catch((err: unknown) => {
-          setPreviewPromptLoading(false);
-          message.error(err instanceof Error ? err.message : '预览失败');
-        });
-    });
-  };
-
-  /** 关闭预览弹窗：必须中止流，否则后台仍在推、组件卸载后 setState 会告警 */
-  const closePreview = () => {
-    stopPreviewStream();
-    setPreviewOpen(false);
+      .catch((err: unknown) => {
+        setPreviewPromptLoading(false);
+        message.error(err instanceof Error ? err.message : '预览失败');
+      });
   };
 
   const copyPreview = async () => {
@@ -596,6 +631,107 @@ export function KnowledgeConfigEditor({
     } catch {
       message.error('复制失败');
     }
+  };
+
+  /* ---- 结果校验（源 `PreviewModal` 的 openCheck / check / stopHandle + 内嵌子弹窗） ---- */
+
+  /** 中止校验流（终止按钮 / 关闭子弹窗 / 关闭预览弹窗 / 新一次校验都走这里） */
+  const stopCheckStream = () => {
+    // 先作废序号：abort 触发的 onDone 随后到达时会被判为过期，不会再来改状态
+    checkSeqRef.current += 1;
+    checkSseRef.current?.abort();
+    checkSseRef.current = null;
+    setChecking(false);
+  };
+
+  /** 打开「校验结果」子弹窗（源 `openCheck`；源只置 visible，这里顺手把模型默认成当前用的那个） */
+  const openCheck = () => {
+    setCheckModelCode((prev) => prev || String(configInfo.largeModelCode ?? ''));
+    setCheckText('');
+    setCheckOpen(true);
+  };
+
+  const closeCheck = () => {
+    stopCheckStream();
+    setCheckOpen(false);
+  };
+
+  /**
+   * 「校验」：POST-SSE 流式生成（源 `PreviewModal.check()` → `@/utils/sse.js` 的 `postSendSse`）
+   *
+   * 入参与源端逐字对齐（源 `params2.value` 的 json 体）：
+   * ```
+   * url            = '/KnowledgeBase/config/getResultCheck'   → 本工程加 /agent 前缀
+   * paramId        = knownId
+   * largeModelCode = 子弹窗里选的大模型（源 `checkLargeModelCode`）
+   * inputParam     = 请求参数（**数组**，不是 JSON 串；后端是 JSONArray，传空串会 400）
+   * largeModelParam= 大模型参数（**JSON 字符串**；后端该字段是 String，传对象会被 Jackson 拒成 400）
+   * prompt         = 「生成文案」左栏的文本（源 `previewContext`；后端 @NotBlank，空则 400）
+   * outPutContent  = 「预览结果」的**原始全文**（源 `contentProps.resContent`）
+   * ```
+   * ⚠️ `outPutContent` 要传**原始全文**，不是打字机逐字显示的那份（源 `finalText`）——
+   *    传被截断的文本会让校验结论失真。
+   *
+   * 后端 `sendResultCheck` 的逻辑：取 `prompt_verify_scene_info` 中 `scene_name='大模型评估'` 的模板，
+   * 用 `{rewrite_question}` = prompt、`{answer}` = outPutContent、`{cur_time}` = 当天 拼出提示词，
+   * 再调大模型流式返回校验结论。
+   *
+   * ⚠️ 该模板表（`prompt_verify_scene_info` + `prompt_verify_scene_relate_prompt_info`）
+   *    **在公司库与本地库都是 0 行**（已实测）→ 服务端会记「结果校验时，未查询到相关模版信息！」
+   *    然后只发一条 `finished!` 就结束流，前端表现为"调用成功但没有任何内容"。
+   *    这属**数据缺失**，不是接线问题；补上模板数据即可生效。
+   */
+  const startCheckStream = useCallback(() => {
+    if (!previewPrompt.trim()) {
+      message.error('「生成文案」为空，无法校验');
+      return;
+    }
+    if (!previewText) {
+      message.error('「预览结果」为空，无法校验');
+      return;
+    }
+    // 先作废旧序号（并让旧流失效），再开新流 —— 顺序不能反，理由同 previewSeqRef
+    checkSeqRef.current += 1;
+    const seq = checkSeqRef.current;
+    const isStale = () => seq !== checkSeqRef.current;
+    checkSseRef.current?.abort();
+    setCheckText('');
+    setChecking(true);
+    checkSseRef.current = agentSse({
+      url: '/agent/KnowledgeBase/config/getResultCheck',
+      body: {
+        paramId: knownId,
+        largeModelCode: checkModelCode,
+        inputParam,
+        // `buildPayload()` 已把 largeModelParam 转成 JSON 字符串；空时它是 undefined → 归一成空串
+        largeModelParam: String(buildPayload().largeModelParam ?? ''),
+        prompt: previewPrompt,
+        outPutContent: previewText,
+      },
+      onChunk: (chunk) => {
+        if (isStale()) return;
+        setCheckText((prev) => prev + chunk.text);
+      },
+      onDone: () => {
+        if (isStale()) return;
+        checkSseRef.current = null;
+        setChecking(false);
+      },
+      onError: (err) => {
+        if (isStale()) return;
+        checkSseRef.current = null;
+        setChecking(false);
+        message.error(err instanceof Error ? err.message : '结果校验失败');
+      },
+    });
+  }, [knownId, checkModelCode, inputParam, buildPayload, previewPrompt, previewText]);
+
+  /** 关闭预览弹窗：必须中止「预览流 + 校验流」，否则后台仍在推、组件卸载后 setState 会告警 */
+  const closePreview = () => {
+    stopPreviewStream();
+    stopCheckStream();
+    setCheckOpen(false);
+    setPreviewOpen(false);
   };
 
   /**
@@ -622,7 +758,11 @@ export function KnowledgeConfigEditor({
         open={open}
         width="100vw"
         style={{ top: 0, maxWidth: '100vw', padding: 0 }}
-        styles={{ body: { height: 'calc(100vh - 120px)', overflow: 'auto', background: '#f5f5ff', padding: 12 } }}
+        /* ⚠️ body 必须 `overflow: hidden`：
+           改之前 body 也是 `overflow: auto`，于是「body / 中栏 / 右栏」三处各自带一条纵向滚动条，
+           同一屏最多同时看到 3 条，观感很乱。这里把滚动权下放给中栏与右栏内部
+           （与源工程 V2 一致：`.container-middle` 与 `.param-container` 各自滚动，body 不滚）。 */
+        styles={{ body: { height: 'calc(100vh - 120px)', overflow: 'hidden', background: '#f5f5ff', padding: 12 } }}
         title={
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingRight: 40 }}>
             <div style={{ fontWeight: 600 }}>{`${knownName ? knownName + ' -   ' : ''}${knownCode ?? ''}`}</div>
@@ -658,10 +798,13 @@ export function KnowledgeConfigEditor({
         destroyOnClose
       >
         <Spin spinning={loading}>
-          <div style={{ display: 'flex', gap: 10 }}>
+          {/* 三栏统一高度：外层给一个确定高度，三栏一律 `height:100%`。
+              改之前是三套互不匹配的魔法数字（中栏 `100vh-144`、右栏内层 `100vh-204`），
+              导致右栏内容区比中栏矮 60px 且各自独立滚动 —— 这就是「右侧显得挤/窄」的一部分原因。 */}
+          <div style={{ display: 'flex', gap: 10, height: 'calc(100vh - 144px)' }}>
             {/* ===== 左栏：树 ===== */}
             {treeVisible && (
-              <div style={{ width: 288 }}>
+              <div style={{ width: 288, height: '100%' }}>
                 <Card size="small" bordered={false} bodyStyle={{ padding: '8px 4px' }}>
                   <Tabs
                     size="small"
@@ -671,12 +814,12 @@ export function KnowledgeConfigEditor({
                       {
                         key: 'index',
                         label: '指标',
-                        children: <IndexTreePicker height={430} onSelect={handleIndexSelect} />,
+                        children: <IndexTreePicker height="calc(100vh - 320px)" onSelect={handleIndexSelect} />,
                       },
                       {
                         key: 'rule',
                         label: '规则',
-                        children: <RuleTreePicker height={430} onSelect={handleRuleSelect} />,
+                        children: <RuleTreePicker height="calc(100vh - 320px)" onSelect={handleRuleSelect} />,
                       },
                     ]}
                   />
@@ -685,7 +828,7 @@ export function KnowledgeConfigEditor({
             )}
 
             {/* ===== 中栏 ===== */}
-            <div style={{ flex: 1, height: 'calc(100vh - 144px)', overflowY: 'auto', position: 'relative' }}>
+            <div style={{ flex: 1, minWidth: 0, height: '100%', overflowY: 'auto', position: 'relative' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                 <Button size="small" onClick={() => setTreeVisible((v) => !v)}>
                   {treeVisible ? '收起左栏' : '展开左栏'}
@@ -756,9 +899,18 @@ export function KnowledgeConfigEditor({
             </div>
 
             {/* ===== 右栏 ===== */}
-            <div style={{ width: '26%' }}>
-              <Card size="small" title="预览配置">
-                <div style={{ height: 'calc(100vh - 204px)', overflowY: 'auto' }}>
+            {/* 宽度：源工程是 `26%`，在宽屏下「请求参数」那张表会被挤得需要横向滚动，
+                这里放宽到 `30%` 并给一个 400px 下限（窄屏时不再被压扁）。
+               高度：Card 自身做 flex 纵向容器，body 用 `flex:1 + minHeight:0` 吃掉剩余高度并**只在这里滚动**，
+                不再写 `calc(100vh - 204px)`（那个值和中栏的 `-144px` 对不齐，会白白少 60px）。 */}
+            <div style={{ width: '30%', minWidth: 400, height: '100%' }}>
+              <Card
+                size="small"
+                title="预览配置"
+                style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
+                styles={{ body: { flex: 1, minHeight: 0, overflow: 'auto' } }}
+              >
+                <div>
                   <div style={{ fontWeight: 600, marginBottom: 4 }}>模型配置</div>
                   <Select
                     allowClear
@@ -935,7 +1087,7 @@ export function KnowledgeConfigEditor({
               {previewing && !previewText && (
                 <Alert type="info" message="正在生成…" showIcon style={{ marginBottom: 8 }} />
               )}
-              <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.7 }}>{previewDisplay.text}</div>
+              <ThinkText text={previewDisplay.text} />
             </div>
             <Space style={{ marginTop: 8 }}>
               <Button danger onClick={stopPreviewStream} disabled={!previewing}>
@@ -944,9 +1096,58 @@ export function KnowledgeConfigEditor({
               <Button onClick={() => void copyPreview()} disabled={!previewDisplay.text}>
                 复制
               </Button>
+              {/* 源：`:disabled="!contentProps.isFinish"` —— 流没结束（或没结果）不给点 */}
+              <Button type="primary" onClick={openCheck} disabled={previewing || !previewText}>
+                结果校验
+              </Button>
             </Space>
           </Col>
         </Row>
+      </Modal>
+
+      {/* 「校验结果」子弹窗（源 PreviewModal 内嵌的第二个 a-modal，width=800） */}
+      <Modal
+        open={checkOpen}
+        title="校验结果"
+        width={800}
+        onCancel={closeCheck}
+        onOk={closeCheck}
+        okText="确定"
+        cancelText="取消"
+        destroyOnClose
+      >
+        <Space style={{ marginBottom: 10 }}>
+          <Select
+            allowClear
+            showSearch
+            style={{ width: 200 }}
+            placeholder="请选择大模型"
+            value={checkModelCode || undefined}
+            onChange={(v) => setCheckModelCode(v ?? '')}
+            options={modelOptions.map((o) => ({ value: o.value, label: o.title }))}
+            optionFilterProp="label"
+          />
+          <Button type="primary" onClick={() => startCheckStream()} disabled={checking}>
+            校验
+          </Button>
+          <Button danger onClick={stopCheckStream} disabled={!checking}>
+            终止
+          </Button>
+        </Space>
+        <div
+          style={{
+            height: 400,
+            maxHeight: 600,
+            overflow: 'auto',
+            border: '1px solid #ebebeb',
+            padding: 10,
+          }}
+        >
+          {checking && !checkText && (
+            <Alert type="info" message="正在校验…" showIcon style={{ marginBottom: 8 }} />
+          )}
+          <ThinkText text={checkText} />
+        </div>
       </Modal>
     </>
   );

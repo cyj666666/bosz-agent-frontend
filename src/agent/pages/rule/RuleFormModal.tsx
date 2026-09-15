@@ -30,6 +30,7 @@ import { agentSse } from '../../api/agentSse';
 import type { IndexTreeNode, RuleExecuteResult, RuleItem, RuleMetricItem, SupplementaryOption } from '../../types';
 import MarkdownText from '../../components/MarkdownText';
 import { useTypewriter } from '../../components/useTypewriter';
+import { ThinkText } from '../../components/ThinkText';
 
 /** 触发条件解析智能体在知识库侧的 moduleCode（源工程写死） */
 const AI_ANALYSIS_MODULE_CODE = 'IntelligentStrategyEngine';
@@ -816,7 +817,12 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
               <>
                 <div style={{ marginTop: 20, marginBottom: 8, color: '#595959' }}>AI分析</div>
                 <div style={{ border: '1px solid #f0f0f0', borderRadius: 4, padding: 8, maxHeight: 320, overflow: 'auto' }}>
-                  <MarkdownText content={aiDisplay.text} placeholder={aiSending ? '生成中…' : '-'} />
+                  {/* 后端 enable_think=true 时会把思考内容用 <think>…</think> 包起来一起推，
+                      这里交给 ThinkText 折叠显示（不渲染的话页面上会看到裸露的标签） */}
+                  <ThinkText
+                    text={aiDisplay.text}
+                    renderText={(t) => <MarkdownText content={t} placeholder={aiSending ? '生成中…' : '-'} />}
+                  />
                 </div>
               </>
             )}
@@ -825,7 +831,10 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
               <>
                 <div style={{ marginTop: 20, marginBottom: 8, color: '#595959' }}>补充分析</div>
                 <div style={{ border: '1px solid #f0f0f0', borderRadius: 4, padding: 8, maxHeight: 320, overflow: 'auto' }}>
-                  <MarkdownText content={sDisplay.text} placeholder={sSending ? '生成中…' : '-'} />
+                  <ThinkText
+                    text={sDisplay.text}
+                    renderText={(t) => <MarkdownText content={t} placeholder={sSending ? '生成中…' : '-'} />}
+                  />
                 </div>
               </>
             )}

@@ -34,6 +34,7 @@ import type { AgentSseHandle } from '../../api/agentSse';
 import { AdFormRenderer } from '../../components/AdFormRenderer';
 import type { AdFormOption, AdFormRendererHandle } from '../../components/AdFormRenderer';
 import { useTypewriter } from '../../components/useTypewriter';
+import { ThinkText } from '../../components/ThinkText';
 
 export interface BlackBoxConfigModalProps {
   open: boolean;
@@ -359,7 +360,7 @@ export function BlackBoxConfigModal({
           />
           <div style={{ marginTop: 12, height: 300, overflow: 'auto', border: '1px solid #d9d9d9', borderRadius: 4, padding: 6 }}>
             {sending && !previewText && <Alert type="info" message="正在生成…" showIcon style={{ marginBottom: 8 }} />}
-            <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{previewDisplay.text}</div>
+            <ThinkText text={previewDisplay.text} lineHeight={1.6} />
           </div>
         </Col>
       </Row>

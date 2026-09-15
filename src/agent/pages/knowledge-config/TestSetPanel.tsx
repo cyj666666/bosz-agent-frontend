@@ -21,9 +21,10 @@
  * React 侧改为受控：`value` + `onChange`，父组件直接持有这份数据。
  */
 import { useCallback, useEffect, useState } from 'react';
-import { Button, Input, Modal, Popconfirm, Select, Space, Table, message } from 'antd';
+import { Button, Input, Modal, Popconfirm, Select, Space, Table, Tooltip, message } from 'antd';
+import { CheckOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
-import { addTestSet, deleteTestSet, getTestSetList } from '../../api/knowledgeConfig';
+import { addTestSet, deleteTestSet, editTestSet, getTestSetList } from '../../api/knowledgeConfig';
 
 /** 单个请求参数（字段名与源工程一致） */
 export interface InputParamItem {
@@ -57,6 +58,18 @@ export function TestSetPanel({ knownId, value, onChange }: TestSetPanelProps) {
   const [saveOpen, setSaveOpen] = useState(false);
   const [saveName, setSaveName] = useState('');
   const [saving, setSaving] = useState(false);
+  /* 「编辑测试集」：源 `TestSet.vue` 下拉选项 hover 出来的 ✏️ → `SaveTestSetModal(isEdit=true)`
+     → `editTestSet({ id, inputParamName, inputParam })`，即**改名 + 用当前参数列表覆盖该测试集**。 */
+  const [editOpen, setEditOpen] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+  /**
+   * 参数行的「行内编辑」态（源 `ParamList.vue` 的 `editRowId`）
+   *
+   * 源行为：默认是**纯文本显示**，点 ✏️ 才变输入框、图标变 ✓，点 ✓ 结束（`confirmRow`）。
+   * 同一时刻只允许编辑一行（`editRowId` 单值）。新增参数会直接进入编辑态。
+   */
+  const [editRowId, setEditRowId] = useState<string>('');
 
   const loadTestList = useCallback(async () => {
     if (!knownId) return;
@@ -94,38 +107,65 @@ export function TestSetPanel({ knownId, value, onChange }: TestSetPanelProps) {
     {
       title: '参数名称',
       dataIndex: 'name',
-      render: (_t, record, index) => (
-        <Input
-          value={record.name}
-          onChange={(e) => patchItem(index, { name: e.target.value })}
-          placeholder="请输入参数名称"
-        />
-      ),
+      render: (text: unknown, record, index) =>
+        record.id === editRowId ? (
+          <Input
+            value={record.name}
+            placeholder="请输入参数名称"
+            onChange={(e) => patchItem(index, { name: e.target.value })}
+          />
+        ) : (
+          <span>{String(text ?? '')}</span>
+        ),
     },
     {
       title: '参数值',
       dataIndex: 'defaultValue',
-      render: (_t, record, index) => (
-        <Input
-          value={record.defaultValue}
-          onChange={(e) => patchItem(index, { defaultValue: e.target.value })}
-          placeholder="请输入参数值"
-        />
-      ),
+      render: (text: unknown, record, index) =>
+        record.id === editRowId ? (
+          <Input
+            value={record.defaultValue}
+            placeholder="请输入参数值"
+            onChange={(e) => patchItem(index, { defaultValue: e.target.value })}
+          />
+        ) : (
+          <span>{String(text ?? '')}</span>
+        ),
     },
     {
       title: '操作',
-      width: 90,
-      render: (_t, _record, index) => (
-        <Popconfirm
-          title="确定删除该参数吗？"
-          okText="确认"
-          cancelText="取消"
-          onConfirm={() => onChange(value.filter((_it, i) => i !== index))}
-        >
-          <a>删除</a>
-        </Popconfirm>
-      ),
+      width: 80,
+      align: 'center',
+      /* 源 `ParamList.vue` 的 action 列：
+         编辑中 → ✓（确认，结束编辑）；否则 → 🗑️（删除，带确认气泡）+ ✏️（进入编辑） */
+      render: (_t, record, index) =>
+        record.id === editRowId ? (
+          <Tooltip title="确认">
+            <CheckOutlined
+              style={{ color: '#6060f0', fontSize: 16, cursor: 'pointer' }}
+              onClick={() => setEditRowId('')}
+            />
+          </Tooltip>
+        ) : (
+          <Space size="middle">
+            <Popconfirm
+              title="确认删除此参数吗？"
+              okText="确认"
+              cancelText="取消"
+              onConfirm={() => onChange(value.filter((_it, i) => i !== index))}
+            >
+              <Tooltip title="删除">
+                <DeleteOutlined style={{ fontSize: 16, cursor: 'pointer' }} />
+              </Tooltip>
+            </Popconfirm>
+            <Tooltip title="编辑">
+              <EditOutlined
+                style={{ color: '#6060f0', fontSize: 16, cursor: 'pointer' }}
+                onClick={() => setEditRowId(record.id)}
+              />
+            </Tooltip>
+          </Space>
+        ),
     },
   ];
 
@@ -146,6 +186,43 @@ export function TestSetPanel({ knownId, value, onChange }: TestSetPanelProps) {
       message.error(err instanceof Error ? err.message : '保存失败');
     } finally {
       setSaving(false);
+    }
+  };
+
+  /** 打开「编辑测试集」：预填该测试集当前的名字（源 `editHandle`） */
+  const openEdit = () => {
+    const hit = testList.find((t) => t.id === selectedTestId);
+    if (!hit) {
+      message.warning('请先选择测试集');
+      return;
+    }
+    setEditName(hit.inputParamName ?? '');
+    setEditOpen(true);
+  };
+
+  /** 保存编辑：改名 + 用**当前参数列表**覆盖该测试集（源 `SaveTestSetModal.editHandle`） */
+  const handleEditSave = async () => {
+    if (!selectedTestId) return;
+    const name = editName.trim();
+    if (!name) {
+      message.warning('请输入测试集名称');
+      return;
+    }
+    setEditSaving(true);
+    try {
+      await editTestSet({
+        id: selectedTestId,
+        knowledgeId: knownId,
+        inputParamName: name,
+        inputParam: JSON.stringify(value),
+      });
+      message.success('保存成功！');
+      setEditOpen(false);
+      void loadTestList();
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '保存失败');
+    } finally {
+      setEditSaving(false);
     }
   };
 
@@ -173,6 +250,12 @@ export function TestSetPanel({ knownId, value, onChange }: TestSetPanelProps) {
           }}
         />
         <Button onClick={() => setSaveOpen(true)}>另存为测试集</Button>
+        {/* 「编辑测试集」——源 `TestSet.vue` 把 ✏️/🗑️ 放在下拉选项 hover 里；
+            这里保留按钮形态（不引入全局 hover CSS，零回归），能力与源一致：
+            改名 + 用当前参数列表覆盖该测试集（`editTestSet`）。 */}
+        <Button disabled={!selectedTestId} onClick={openEdit}>
+          编辑测试集
+        </Button>
         <Popconfirm
           title="确定删除该测试集吗？"
           okText="确认"
@@ -211,10 +294,33 @@ export function TestSetPanel({ knownId, value, onChange }: TestSetPanelProps) {
         type="dashed"
         block
         style={{ marginTop: 8 }}
-        onClick={() => onChange([...value, { name: '', defaultValue: '', id: uid() }])}
+        onClick={() => {
+          // 源 `ParamList.addParam`：新增后**直接进入编辑态**（editRowId = 新行 id）
+          const id = uid();
+          onChange([...value, { name: '', defaultValue: '', id }]);
+          setEditRowId(id);
+        }}
       >
         添加参数
       </Button>
+
+      <Modal
+        open={editOpen}
+        title="编辑测试集"
+        onCancel={() => setEditOpen(false)}
+        onOk={() => void handleEditSave()}
+        confirmLoading={editSaving}
+        destroyOnClose
+      >
+        <Input
+          placeholder="请输入测试集名称"
+          value={editName}
+          onChange={(e) => setEditName(e.target.value)}
+        />
+        <div style={{ marginTop: 8, color: '#8c8c8c', fontSize: 12 }}>
+          保存后会用**当前参数列表**覆盖该测试集（与源系统一致）
+        </div>
+      </Modal>
 
       <Modal
         open={saveOpen}

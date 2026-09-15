@@ -59,7 +59,8 @@ interface TreeItem extends TreeDataNode {
 
 export interface RuleTreePickerProps {
   onSelect?: (node: RuleTreePickerNode) => void;
-  height?: number;
+  /** 树区域高度：`number`(px) 或 CSS 长度（`'100%'` / `'calc(100vh - 320px)'`） */
+  height?: number | string;
   showSearch?: boolean;
 }
 

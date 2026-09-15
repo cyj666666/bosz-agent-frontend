@@ -38,8 +38,14 @@ interface TreeItem extends TreeDataNode {
 export interface IndexTreePickerProps {
   /** 点击节点（源工程 emit('select', item)） */
   onSelect?: (node: IndexTreePickerNode) => void;
-  /** 树区域高度（px） */
-  height?: number;
+  /**
+   * 树区域高度
+   *
+   * 支持 `number`(px) 与字符串（`'100%'` / `'calc(100vh - 320px)'`）：
+   * 源工程 `TargetTree` 传的就是 `height="calc(100vh - 300px)"`，
+   * 让树跟着弹窗高度自适应，而不是写死像素值。
+   */
+  height?: number | string;
   /** 是否允许拖拽节点（默认 true） */
   draggable?: boolean;
   /** 是否显示搜索框（默认 true） */

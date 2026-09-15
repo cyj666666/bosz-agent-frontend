@@ -372,18 +372,36 @@ export function previewKnowledge(params: Record<string, unknown>): Promise<unkno
   return agentPost('/agent/KnowledgeBase/config/preview', params, 200 * 1000);
 }
 
+/**
+ * ⚠️ 下面 4 个「溯源 / 图片 / 全源」预览接口：**源端实际上从未被触发**（2026-09-15 已核查，
+ * 详见 `bosz-agent-backend/doc/知识配置_预览类接口_源端使用情况核查.md`），故本工程**有意不接线**，
+ * 保留定义只为将来要么启用、要么清理。**不要把它们当成"漏做"去补 UI。**
+ *
+ * | 接口 | 源端情况 |
+ * |---|---|
+ * | `tracePreview` / `imagePreview` / `wholeSourcePreview` | **死代码** —— 只被源端已废弃的 V1 弹窗<br>`KnownConfigModal.vue`（线上用的是 `KnownConfigModalV2.vue`）调用 |
+ * | `resourcePreview` | **活代码但零数据** —— 入口标签靠条件组里的 `resourceFlag=true` 渲染，<br>而公司库/本地库 `knowledge_base_params.prompt` 里 `resourceFlag` **86/86 全是 false** → 永不触发 |
+ *
+ * 数据层佐证（公司库与本地库逐条一致）：`trace_config` / `image_config` / `whole_source_config`
+ * 非空 **0 / 86**；`knowledge_relate_index` 493 行中 `trace_status='Y'`、`trace_card_status='Y'` 均 **0**。
+ */
+
+/** 溯源配置预览 —— 源端死代码（V1 专用），本工程不接线 */
 export function tracePreview(params: Record<string, unknown>): Promise<unknown> {
   return agentPost('/agent/KnowledgeBase/config/tracePreview', params);
 }
 
+/** 图片溯源预览 —— 源端死代码（V1 专用），本工程不接线 */
 export function imagePreview(params: Record<string, unknown>): Promise<unknown> {
   return agentPost('/agent/KnowledgeBase/config/imagePreview', params);
 }
 
+/** 全部来源预览 —— 源端死代码（V1 专用），本工程不接线 */
 export function wholeSourcePreview(params: Record<string, unknown>): Promise<unknown> {
   return agentPost('/agent/KnowledgeBase/config/wholeSourcePreview', params);
 }
 
+/** 溯源配置预览 —— 源端活代码但零数据（依赖 `resourceFlag=true`，实测 0/86），暂不接线 */
 export function resourcePreview(params: Record<string, unknown>): Promise<unknown> {
   return agentPost('/agent/KnowledgeBase/config/resource/preview', params);
 }
