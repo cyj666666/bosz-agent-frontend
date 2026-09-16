@@ -54,11 +54,20 @@ import { useAutoQuery } from '../../components/useAutoQuery';
 import { IndexRelateInfoModal } from './IndexRelateInfoModal';
 import IndexEditorModal from './IndexEditorModal';
 
-/** 表格列（照抄源工程 views/index/tableColumns.json） */
+/**
+ * 表格列（源工程 views/index/tableColumns.json）
+ *
+ * 🔴 前三列**不要加 `ellipsis`**：源工程 `tableColumns.json` 里只有「数据源配置」
+ *    (`indexSource`) 带 `ellipsis: true`，前三列是**自动换行**的。移植时误加了
+ *    `ellipsis` → 指标名称一长就被截成「国税财报4指标-与财务同期值及…」，
+ *    用户在列表里看不到完整名称（2026-09-16 反馈）。
+ *    现在按源端口径复原为换行，并把宽度放宽（260/260/200 → 300/300/380）让绝大多数
+ *    名称一行就能显示完；超长时换行显示，不再隐藏。
+ */
 const COLUMNS: ColumnsType<IndexParamRow> = [
-  { title: '指标ID', dataIndex: 'paramNo', width: 260, ellipsis: true },
-  { title: '指标编号', dataIndex: 'paramID', width: 260, ellipsis: true },
-  { title: '指标名称', dataIndex: 'paramName', width: 200, ellipsis: true },
+  { title: '指标ID', dataIndex: 'paramNo', width: 300 },
+  { title: '指标编号', dataIndex: 'paramID', width: 300 },
+  { title: '指标名称', dataIndex: 'paramName', width: 380 },
   { title: '指标类型', dataIndex: 'paramType', width: 120, align: 'center', render: (v: string) => PARAM_TYPE_LABELS[v] ?? v },
   { title: '数据源类型', dataIndex: 'scriptTypeDesc', width: 160, align: 'center' },
   { title: '数据源配置', dataIndex: 'indexSource', width: 120, align: 'center', ellipsis: true },
@@ -566,7 +575,8 @@ export default function IndexConfigList() {
               loading={loading}
               columns={COLUMNS}
               dataSource={rows}
-              scroll={{ x: 2000 }}
+              /* 列宽合计 2020 + 多选列 → 取 2100，避免 x 小于列宽和导致列被压缩 */
+              scroll={{ x: 2100 }}
               rowSelection={{
                 selectedRowKeys: rowKeys,
                 onChange: (keys) => setRowKeys(keys),
@@ -658,11 +668,11 @@ export default function IndexConfigList() {
           loading={importLoading}
           dataSource={importRows}
           columns={[
-            { title: '指标ID', dataIndex: 'paramNo', width: 240, ellipsis: true },
-            { title: '指标名称', dataIndex: 'paramName', width: 200, ellipsis: true },
+            { title: '指标ID', dataIndex: 'paramNo', width: 260 },
+            { title: '指标名称', dataIndex: 'paramName', width: 320 },
             { title: '数据源类型', dataIndex: 'scriptTypeDesc', width: 140, align: 'center' },
           ]}
-          scroll={{ y: 360, x: 600 }}
+          scroll={{ y: 360, x: 740 }}
           rowSelection={{ selectedRowKeys: importKeys, onChange: (keys) => setImportKeys(keys) }}
           pagination={{ pageSize: 20, showSizeChanger: false }}
         />
