@@ -298,7 +298,16 @@ export default function IndexEditorModal({ open, editType, row, parentGroup, onC
       setDataSourceKeys(['data-source-config']);
       return;
     }
-    if (!row) return;
+    if (!row) {
+      // 🔴 防御（2026-09-16 实锤）：`editType='config'` 却拿不到行时**不能**让弹框停在一个空表单上
+      //    —— 用户填完点保存会把 `paramNo: ''` 打给后端，后端 `getById('')` 查不到 →
+      //    返回「更新失败！」，而界面上完全看不出原因。
+      //    （根因在调用方：子指标在父行的 `children` 里，若用顶层 `rows.find` 就会取不到；
+      //      已在 IndexConfigList 用 `findRowByParamNo` 整树查找修掉，这里只是兜底。）
+      message.error('未取到该指标的数据，请关闭后重新选择');
+      onClose();
+      return;
+    }
     setLoading(true);
     queryInfo({ paramNo: row.paramNo })
       .then((detail) => {
@@ -353,7 +362,7 @@ export default function IndexEditorModal({ open, editType, row, parentGroup, onC
       })
       .catch((e) => message.error((e as Error)?.message || '指标详情加载失败'))
       .finally(() => setLoading(false));
-  }, [open, editType, row, parentGroup]);
+  }, [open, editType, row, parentGroup, onClose]);
 
   /* ---------------- 保存 ---------------- */
   const doSave = async () => {
@@ -363,6 +372,10 @@ export default function IndexEditorModal({ open, editType, row, parentGroup, onC
     if (!form.dataMethod) return message.warning('指标值获取方式不能为空');
     if (!form.inputMethod) return message.warning('输入形式不能为空');
     if (showReadOnly && !form.readOnly) return message.warning('是否只读不能为空');
+    // 🔴 更新必须有 paramNo（后端 `updateIndexParamsInfo` 用它定位记录，空串直接返回「更新失败！」）
+    if (editType === 'config' && !form.paramNo) {
+      return message.error('未取到指标ID，请关闭弹框后重新选择该指标再保存');
+    }
 
     setSaving(true);
     try {

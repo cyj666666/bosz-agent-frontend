@@ -84,6 +84,35 @@ interface FilterState {
   indexSource: string;
 }
 
+/**
+ * 在整棵列表树里按 `paramNo` 找行（**顶层 + 嵌套的 `children`**）
+ *
+ * 🔴 为什么必须递归：`queryAllList` 返回的是**树**（后端 `TreeUtil.buildTree` 产出，
+ * `IndexParamsEntity extends BaseTree` 自带 `children`），子指标挂在父行的 `children` 里，
+ * antd Table 默认 `childrenColumnName = 'children'` 会把它们渲染成**可展开的子行**。
+ *
+ * 原实现是 `rows.find((r) => String(r.paramNo) === paramNo)` —— **只在顶层数组里找**：
+ * 选中**子指标**点「配置」时返回 `undefined` → 弹框拿到 `row = null` → 回显整段跳过 →
+ * 表单保持空（或上一次的残留）→ 保存时 `paramNo` 是空串 → 后端 `getById('')` 查不到 →
+ * **`更新失败！`**（2026-09-16 实测：`2100189565707907073` 下的子指标 `ypsfczdcdy`，
+ * 后端日志 `selectById ... Parameters: (String)`）。
+ *
+ * 源工程 `views/index/ConfigList.vue` 用的是表格 `rowSelection.onChange(keys, nodes)` 的
+ * **第二参 `selectedRowNodes`**（真实行对象，子行也有），本工程改为「整树查找」——
+ * 等价，且不依赖 antd 回调形态。
+ */
+function findRowByParamNo(list: IndexParamRow[], paramNo: string): IndexParamRow | null {
+  for (const row of list) {
+    if (String(row.paramNo) === paramNo) return row;
+    const kids = (row as { children?: IndexParamRow[] }).children;
+    if (Array.isArray(kids) && kids.length) {
+      const hit = findRowByParamNo(kids, paramNo);
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
+
 const EMPTY_FILTER: FilterState = { paramNo: '', paramId: '', paramName: '', indexSource: '' };
 
 export default function IndexConfigList() {
@@ -414,7 +443,13 @@ export default function IndexConfigList() {
   const doRelateCheck = () => {
     const paramNo = requireOne();
     if (!paramNo) return;
-    setRelateParam(rows.find((r) => String(r.paramNo) === paramNo) ?? null);
+    // 同上：子指标要用整树查找，否则弹框拿不到行、静默什么都不发生
+    const row = findRowByParamNo(rows, paramNo);
+    if (!row) {
+      message.warning('未找到该指标的数据，请刷新列表后重试');
+      return;
+    }
+    setRelateParam(row);
   };
 
   /** 业务指标快速引入（基础版）：从全部指标里多选后引入当前分组 */
@@ -538,8 +573,14 @@ export default function IndexConfigList() {
                 onClick={() => {
                   const paramNo = requireOne();
                   if (!paramNo) return;
+                  // 子指标在父行的 children 里 → 必须整树查找（见 findRowByParamNo 的说明）
+                  const row = findRowByParamNo(rows, paramNo);
+                  if (!row) {
+                    message.warning('未找到该指标的数据，请刷新列表后重试');
+                    return;
+                  }
                   setEditorType('config');
-                  setEditorRow(rows.find((r) => String(r.paramNo) === paramNo) ?? null);
+                  setEditorRow(row);
                   setEditorOpen(true);
                 }}
               >
