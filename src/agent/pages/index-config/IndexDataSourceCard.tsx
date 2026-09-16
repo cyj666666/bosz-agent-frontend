@@ -76,7 +76,7 @@ import {
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { getDataSourceOptions, getSyncTableList, sqlPreviewList } from '../../api/dataSourceAgent';
+import { getDataSourceList, getSyncTableList, sqlPreviewList } from '../../api/dataSourceAgent';
 import { useAgentTable } from '../../components/useAgentTable';
 import type { DataSourceOption, SqlPreviewResult, SyncTableRow } from '../../api/dataSourceAgent';
 import { previewKnowledgeCode, queryGroupTree, queryKnowledgeCodeOptions } from '../../api/knowledgeConfig';
@@ -371,7 +371,9 @@ export function IndexDataSourceCard({
   /* ---- 下拉数据 ---- */
   useEffect(() => {
     if (scriptType !== 'Sql') return;
-    getDataSourceOptions()
+    // 🔴 必须走 `/list`（源工程口径）——它的 value 是 `sys_data_source.id`；
+    //    不能走 `/options`（value 是 code），否则「选完数据源」就报数据源不存在。
+    getDataSourceList()
       .then(setDataSources)
       .catch(() => setDataSources([]));
   }, [scriptType]);
@@ -730,9 +732,9 @@ export function IndexDataSourceCard({
               optionFilterProp="label"
               value={dataSourceId || undefined}
               options={dataSources.map((d) => ({
-                // 实测后端返回 value/label/text（见 api/dataSourceAgent.ts 的说明），这里同时兼容 id/name
-                value: String(d.value ?? d.id ?? ''),
-                label: String(d.label ?? d.text ?? d.name ?? d.value ?? ''),
+                // value = `sys_data_source.id`（后端按主键解析，见 api/dataSourceAgent.ts 的说明）
+                value: String(d.value ?? ''),
+                label: String(d.label ?? d.value ?? ''),
               }))}
               onChange={(v) => {
                 const next = v ?? '';

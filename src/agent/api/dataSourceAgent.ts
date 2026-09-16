@@ -11,20 +11,28 @@ import type { AgentListResult } from '../types';
 /**
  * 数据源下拉项
  *
- * ⚠️ **字段名以实测为准**：`/api/agent/sys/dataSource/options` 实际返回
- * `{"value":"boszLocal","label":"苏州银行本地库","text":"苏州银行本地库"}`——
- * 是 Jeecg 风格的 `value`/`label`/`text`，**不是** `id`/`name`。
- * 而 `getSyncTableList` 的入参叫 `dataSourceId`，取的就是这里的 `value`。
+ * 🔴 **`value` 必须是 `sys_data_source.id`（主键），不是 `code`。**
+ *
+ * 为什么：后端所有取数路径都按**主键**解析 —— `SysDataSourceServiceImpl#getDynamicDbSourceById`
+ * → `getById(id)`，被「表列表 / 表字段 / SQL 预览 / 数据预览」以及运行时取数 `SqlDataSetBuilder`
+ * 全部复用；`index_params.script.dataSource` 里存的也是 id
+ * （公司库实测：`2095447359636992001` 正是该公司 `sys_data_source` 的主键）。
+ * `code`（`boszLocal` / `openGauss`）只在 `getDynamicDbSourceByCode`（动态连接池缓存 key）里用，
+ * **不能**写进 `script`。
+ *
+ * 🔴 2026-09-16 实锤的坑：本文件原先接的是 `/sys/dataSource/options`，而该接口是
+ * `option.put("value", item.getCode())` → 返回 **code**（`boszLocal`）。
+ * 于是「配置 → 数据源配置 → 改成 SQL 脚本 → 选数据源」立刻报
+ * `ERROR ... 数据源信息不存在,dataSourceId:boszLocal`（后端 `WHERE id=?` 查不到）。
+ *
+ * 源工程 `views/index/DataSourceCard.vue` 用的是 `getDataSourceList('/sys/dataSource/list')`
+ * 再 `map(item => ({ value: item.id, label: item.name }))` —— 本文件对齐之，别再用 `/options` 做下拉。
  */
 export interface DataSourceOption {
-  /** 数据源编码（即 `getSyncTableList` 的 `dataSourceId`） */
+  /** `sys_data_source.id`（主键，即 `getSyncTableList` / `sqlPreviewList` 的 `dataSourceId`） */
   value?: string;
-  /** 显示名 */
+  /** 显示名（`sys_data_source.name`） */
   label?: string;
-  text?: string;
-  /** 兼容形态：万一后端后续改为返回 id/name 也能识别 */
-  id?: string;
-  name?: string;
   [key: string]: unknown;
 }
 
@@ -81,10 +89,22 @@ function toListResult<T>(res: unknown): AgentListResult<T> {
   };
 }
 
-/** 数据源下拉（源 `getDataSourceList`） */
-export async function getDataSourceOptions(): Promise<DataSourceOption[]> {
-  const res = await agentGet<unknown>('/agent/sys/dataSource/options');
-  return pickList<DataSourceOption>(res);
+/**
+ * 数据源下拉（源 `getDataSourceList` → `/sys/dataSource/list`）
+ *
+ * 🔴 **不要换成 `/sys/dataSource/options`**：那个接口的 `value` 是 `code`，
+ * 而后端按主键解析 → 选完就报「数据源信息不存在」（详见 `DataSourceOption` 的说明）。
+ *
+ * 源工程同样一次性拉全（`DataSourceCard.vue` onMounted 传 `pageSize: 999`）。
+ * ⚠️ `/list` 会把 `db_password` **解密后**一起返回，所以这里**只取 id/name 两项**，
+ * 不要把整条实体塞进组件状态。
+ */
+export async function getDataSourceList(): Promise<DataSourceOption[]> {
+  const res = await agentGet<unknown>('/agent/sys/dataSource/list', { pageNo: 1, pageSize: 999 });
+  return pickList<Record<string, unknown>>(res).map((item) => ({
+    value: String(item.id ?? ''),
+    label: String(item.name ?? item.code ?? ''),
+  }));
 }
 
 /**
