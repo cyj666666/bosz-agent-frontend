@@ -465,6 +465,26 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
   const entName = useMemo(() => (params.find((p) => p.fieldName === 'entName')?.fieldValue ?? '').trim(), [params]);
 
   /**
+   * 把参数面板里填写的入参摊平成请求体（2026-09-17 修复）
+   *
+   * 背景：`startAiAnalysis` / `startSupplementaryAnalysis` 此前**只传了 `entName`**，
+   * `reportNo` / `guarantorName` 等参数在链路中直接丢失 → 后端取数拿不到入参时会回落到
+   * 配置里预置的样例值（实测 `index_params.script.paramData` 的 `guarantorName = '泰州公司'`），
+   * 于是"规则判定"用的是用户填的担保人、"补充分析"用的却是样例担保人，
+   * 两边取到不同记录，写出自相矛盾的文案（「担保人泰州公司不是企业实际控制人，学历为。」）。
+   *
+   * 口径与 `doExecute` 里的 `requestParams` 完全一致：`entName` 做 trim，其余原样。
+   */
+  const buildParamPayload = useCallback(() => {
+    const payload: Record<string, string> = {};
+    params.forEach((p) => {
+      const key = (p.fieldName || '').trim();
+      if (key) payload[key] = key === 'entName' ? (p.fieldValue || '').trim() : p.fieldValue;
+    });
+    return payload;
+  }, [params]);
+
+  /**
    * AI 分析（源工程 `aiAnalysisPostText`，moduleCode 写死 `IntelligentStrategyEngine`）
    *
    * 🔴 三处**必须区分"失败"和"空结果"**（2026-09-16 修复）：
@@ -486,6 +506,9 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
     aiAbortRef.current = agentSse({
       url: '/agent/get',
       body: {
+        // 参数面板里填的入参全部带上（含 reportNo / guarantorName），
+        // 否则后端取数会回落配置样例值 —— 见 buildParamPayload 注释。固定键放后面覆盖。
+        ...buildParamPayload(),
         moduleCode: AI_ANALYSIS_MODULE_CODE,
         entName,
         content: form.disposalSuggestion || '',
@@ -529,6 +552,9 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
     sAbortRef.current = agentSse({
       url: '/agent/get',
       body: {
+        // 参数面板里填的入参全部带上（含 reportNo / guarantorName），
+        // 否则后端取数会回落配置样例值 —— 见 buildParamPayload 注释。固定键放后面覆盖。
+        ...buildParamPayload(),
         moduleCode: suppValue.value,
         entName,
         factExpression: factExpression || '',
@@ -585,11 +611,8 @@ export default function RuleFormModal({ open, oldData, onClose, onSuccess }: Rul
     setSError('');
 
     try {
-      const requestParams: Record<string, unknown> = {};
-      params.forEach((p) => {
-        const key = (p.fieldName || '').trim();
-        if (key) requestParams[key] = key === 'entName' ? (p.fieldValue || '').trim() : p.fieldValue;
-      });
+      // 与 AI 分析 / 补充分析共用同一套摊平逻辑，保证三条链路拿到的入参完全一致
+      const requestParams = buildParamPayload();
 
       const res = await apiExecuteRule({
         entName,
